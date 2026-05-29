@@ -1,0 +1,3 @@
+CREATE DATABASE IF NOT EXISTS cti_crm CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON cti_crm.* TO 'cti_user'@'%';
+FLUSH PRIVILEGES;
