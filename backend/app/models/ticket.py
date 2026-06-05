@@ -27,7 +27,7 @@ class Ticket(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     ticket_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    client_id: Mapped[int] = mapped_column(Integer, ForeignKey("clients.id"), index=True)
+    client_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("clients.id"), index=True, nullable=True)
     form_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("forms.id"))
     subject: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)

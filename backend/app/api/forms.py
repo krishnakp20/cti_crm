@@ -35,6 +35,7 @@ class FormCreate(BaseModel):
     is_public: bool = False
     settings: Optional[dict] = None
     fields: List[FormFieldCreate] = []
+    assign_to_client_id: Optional[int] = None  # admin can assign to a client
 
 
 class FormUpdate(BaseModel):
@@ -64,7 +65,11 @@ async def list_forms(
 
 @router.post("/")
 async def create_form(req: FormCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    client_id = current_user.client_id
+    # Admin can assign to a client, otherwise use own client_id
+    if current_user.role == UserRole.ADMIN and req.assign_to_client_id:
+        client_id = req.assign_to_client_id
+    else:
+        client_id = current_user.client_id
     form = Form(
         client_id=client_id,
         name=req.name,
@@ -130,6 +135,21 @@ async def delete_form(form_id: int, current_user: User = Depends(get_current_use
     await db.execute(update(Form).where(Form.id == form_id).values(is_active=False))
     await db.commit()
     return {"message": "Form deleted"}
+
+
+@router.post("/{form_id}/assign")
+async def assign_form_to_client(
+    form_id: int,
+    client_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin assigns an existing form to a client"""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin only")
+    await db.execute(update(Form).where(Form.id == form_id).values(client_id=client_id))
+    await db.commit()
+    return {"message": f"Form {form_id} assigned to client {client_id}"}
 
 
 @router.get("/{form_id}/fields")

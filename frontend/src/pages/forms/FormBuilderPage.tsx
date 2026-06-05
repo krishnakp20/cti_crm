@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { formsApi } from '../../services/api'
+import { formsApi, clientsApi } from '../../services/api'
 import { useForm } from 'react-hook-form'
+import { useSelector } from 'react-redux'
+import { RootState } from '../../redux/store'
 import toast from 'react-hot-toast'
 import { ArrowLeft, Plus, Trash2, GripVertical, Loader2 } from 'lucide-react'
 import { cn } from '../../utils/cn'
@@ -38,8 +40,17 @@ function makeId() { return Math.random().toString(36).slice(2) }
 export default function FormBuilderPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const user = useSelector((s: RootState) => s.auth.user)
+  const isAdmin = user?.role === 'admin'
+
   const { register, handleSubmit, setValue, watch } = useForm({
-    defaultValues: { name: '', slug: '', description: '', category: 'ticket', is_public: false },
+    defaultValues: { name: '', slug: '', description: '', category: 'ticket', is_public: false, assign_to_client_id: '' },
+  })
+
+  const { data: clients } = useQuery({
+    queryKey: ['clients-list'],
+    queryFn: () => clientsApi.list({ limit: 100, status: 'active' }).then(r => r.data),
+    enabled: isAdmin,
   })
 
   const [fields, setFields] = useState<FieldDef[]>([])
@@ -86,6 +97,7 @@ export default function FormBuilderPage() {
     mutationFn: async (formData: any) => {
       const payload = {
         ...formData,
+        assign_to_client_id: formData.assign_to_client_id ? Number(formData.assign_to_client_id) : undefined,
         fields: fields.map((f, i) => ({
           label: f.label,
           field_name: f.field_name,
@@ -140,6 +152,18 @@ export default function FormBuilderPage() {
               <option value="lead">Lead</option>
               <option value="service">Service Request</option>
             </select>
+            {isAdmin && (
+              <>
+                <p className="text-2xs font-semibold text-gray-400 uppercase tracking-wider mt-2">Assign to Client</p>
+                <select {...register('assign_to_client_id')} className="input text-xs">
+                  <option value="">— Global / Unassigned —</option>
+                  {(clients?.items || []).map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.company_name}</option>
+                  ))}
+                </select>
+                <p className="text-2xs text-gray-400">Select a client so they can use this form for tickets</p>
+              </>
+            )}
           </div>
 
           <div className="p-3 flex-1 overflow-y-auto">

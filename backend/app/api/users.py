@@ -36,95 +36,7 @@ class RoleCreateRequest(BaseModel):
     description: Optional[str] = None
 
 
-@router.get("/")
-async def list_users(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    search: Optional[str] = None,
-    role: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    q = select(User)
-    if current_user.role != UserRole.ADMIN:
-        q = q.where(User.client_id == current_user.client_id)
-    if search:
-        q = q.where((User.full_name.ilike(f"%{search}%")) | (User.email.ilike(f"%{search}%")))
-    if role:
-        q = q.where(User.role == role)
-
-    count_q = select(func.count()).select_from(q.subquery())
-    total = (await db.execute(count_q)).scalar()
-
-    q = q.offset((page - 1) * limit).limit(limit).order_by(User.created_at.desc())
-    result = await db.execute(q)
-    users = result.scalars().all()
-
-    return {
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "items": [
-            {
-                "id": u.id,
-                "email": u.email,
-                "full_name": u.full_name,
-                "mobile": u.mobile,
-                "role": u.role,
-                "is_active": u.is_active,
-                "department_id": u.department_id,
-                "client_id": u.client_id,
-                "created_at": u.created_at,
-                "last_login": u.last_login,
-            }
-            for u in users
-        ],
-    }
-
-
-@router.post("/")
-async def create_user(req: UserCreateRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == req.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email already exists")
-
-    client_id = None if current_user.role == UserRole.ADMIN else current_user.client_id
-    user = User(
-        email=req.email,
-        full_name=req.full_name,
-        mobile=req.mobile,
-        hashed_password=get_password_hash(req.password),
-        role=req.role,
-        client_id=client_id,
-        department_id=req.department_id,
-        role_id=req.role_id,
-        is_active=True,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role}
-
-
-@router.get("/{user_id}")
-async def get_user(user_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if current_user.role != UserRole.ADMIN and user.client_id != current_user.client_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    return user
-
-
-@router.patch("/{user_id}")
-async def update_user(user_id: int, req: UserUpdateRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    data = req.model_dump(exclude_none=True)
-    if data:
-        await db.execute(update(User).where(User.id == user_id).values(**data))
-        await db.commit()
-    return {"message": "Updated"}
-
+# ── STATIC ROUTES FIRST (before any /{param} routes) ──────────────────────
 
 @router.get("/roles/list")
 async def list_roles(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -173,6 +85,101 @@ async def assign_role_permissions(
         )
     await db.commit()
     return {"message": "Permissions updated"}
+
+
+# ── LIST + CREATE ───────────────────────────────────────────────────────────
+
+@router.get("/")
+async def list_users(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    search: Optional[str] = None,
+    role: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(User)
+    if current_user.role != UserRole.ADMIN:
+        q = q.where(User.client_id == current_user.client_id)
+    if search:
+        q = q.where((User.full_name.ilike(f"%{search}%")) | (User.email.ilike(f"%{search}%")))
+    if role:
+        q = q.where(User.role == role)
+
+    count_q = select(func.count()).select_from(q.subquery())
+    total = (await db.execute(count_q)).scalar()
+
+    q = q.offset((page - 1) * limit).limit(limit).order_by(User.created_at.desc())
+    result = await db.execute(q)
+    users = result.scalars().all()
+
+    return {
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "items": [
+            {
+                "id": u.id,
+                "email": u.email,
+                "full_name": u.full_name,
+                "mobile": u.mobile,
+                "role": u.role,
+                "role_id": u.role_id,
+                "is_active": u.is_active,
+                "department_id": u.department_id,
+                "client_id": u.client_id,
+                "created_at": u.created_at,
+                "last_login": u.last_login,
+            }
+            for u in users
+        ],
+    }
+
+
+@router.post("/")
+async def create_user(req: UserCreateRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == req.email))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    client_id = None if current_user.role == UserRole.ADMIN else current_user.client_id
+    user = User(
+        email=req.email,
+        full_name=req.full_name,
+        mobile=req.mobile,
+        hashed_password=get_password_hash(req.password),
+        role=req.role,
+        client_id=client_id,
+        department_id=req.department_id,
+        role_id=req.role_id,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role}
+
+
+# ── DYNAMIC /{param} ROUTES LAST ───────────────────────────────────────────
+
+@router.get("/{user_id}")
+async def get_user(user_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if current_user.role != UserRole.ADMIN and user.client_id != current_user.client_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return user
+
+
+@router.patch("/{user_id}")
+async def update_user(user_id: int, req: UserUpdateRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    data = req.model_dump(exclude_none=True)
+    if data:
+        await db.execute(update(User).where(User.id == user_id).values(**data))
+        await db.commit()
+    return {"message": "Updated"}
 
 
 @router.post("/{user_id}/permissions")

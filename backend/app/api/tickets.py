@@ -4,10 +4,11 @@ from sqlalchemy import select, func, update, and_, or_
 from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.middleware.auth import get_current_user
 from app.models.user import User, UserRole
 from app.models.ticket import Ticket, TicketComment, TicketLog, TicketAttachment, TicketStatusEnum, TicketPriority
+from app.models.alert import AlertTrigger
 from app.utils.ticket_number import generate_ticket_number
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -27,6 +28,7 @@ class TicketCreateRequest(BaseModel):
     assigned_to: Optional[int] = None
     tags: Optional[List[str]] = None
     call_log_id: Optional[int] = None
+    client_id: Optional[int] = None  # admin can specify client
 
 
 class TicketUpdateRequest(BaseModel):
@@ -103,22 +105,30 @@ async def create_ticket(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    ticket_number = await generate_ticket_number(db, current_user.client_id)
+    # Use client_id from request (admin) or from logged-in user
+    effective_client_id = req.client_id or current_user.client_id
+    ticket_number = await generate_ticket_number(db, effective_client_id)
+    data = req.model_dump(exclude_none=True)
+    data.pop('client_id', None)  # remove to avoid duplicate kwarg
     ticket = Ticket(
         ticket_number=ticket_number,
-        client_id=current_user.client_id,
+        client_id=effective_client_id,
         created_by=current_user.id,
-        **req.model_dump(exclude_none=True),
+        **data,
     )
     db.add(ticket)
     await db.flush()
+
+    # Set SLA due date based on priority
+    from app.services.alert_service import set_ticket_sla
+    await set_ticket_sla(ticket, db)
 
     log = TicketLog(ticket_id=ticket.id, user_id=current_user.id, action="created", new_value="Ticket created")
     db.add(log)
     await db.commit()
     await db.refresh(ticket)
 
-    background_tasks.add_task(trigger_ticket_alerts, ticket.id, "ticket_created", current_user.id)
+    background_tasks.add_task(trigger_ticket_alerts, ticket.id, AlertTrigger.TICKET_CREATED, current_user.id)
     return ticket
 
 
@@ -165,8 +175,15 @@ async def update_ticket(
 
     await db.commit()
 
-    if data.get("status") and data["status"] != old_status:
-        background_tasks.add_task(trigger_ticket_alerts, ticket_id, "ticket_updated", current_user.id)
+    # Fire appropriate alert based on what changed
+    if data.get("status"):
+        if data["status"] in (TicketStatusEnum.CLOSED, TicketStatusEnum.RESOLVED):
+            trigger = AlertTrigger.TICKET_CLOSED
+        else:
+            trigger = AlertTrigger.TICKET_UPDATED
+        background_tasks.add_task(trigger_ticket_alerts, ticket_id, trigger, current_user.id)
+    elif data.get("assigned_to"):
+        background_tasks.add_task(trigger_ticket_alerts, ticket_id, AlertTrigger.TICKET_ASSIGNED, current_user.id)
 
     return {"message": "Updated"}
 
@@ -226,5 +243,16 @@ async def reopen_ticket(ticket_id: int, current_user: User = Depends(get_current
     return {"message": "Ticket reopened"}
 
 
-async def trigger_ticket_alerts(ticket_id: int, event: str, user_id: int):
-    pass
+async def trigger_ticket_alerts(ticket_id: int, trigger: AlertTrigger, user_id: int):
+    """Background task — fires all matching alert rules for this ticket event."""
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
+            ticket = result.scalar_one_or_none()
+            if not ticket:
+                return
+            from app.services.alert_service import fire_ticket_alert
+            await fire_ticket_alert(db, ticket, trigger, user_id)
+    except Exception as e:
+        from loguru import logger
+        logger.error(f"trigger_ticket_alerts failed: {e}")

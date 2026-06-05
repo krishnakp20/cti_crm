@@ -40,7 +40,7 @@ class User(Base):
     extra_data: Mapped[Optional[dict]] = mapped_column(JSON)
 
     client: Mapped[Optional["Client"]] = relationship("Client", back_populates="users", foreign_keys=[client_id])
-    department: Mapped[Optional["Department"]] = relationship("Department", back_populates="users")
+    department: Mapped[Optional["Department"]] = relationship("Department", back_populates="users", foreign_keys=[department_id])
     role_obj: Mapped[Optional["Role"]] = relationship("Role", back_populates="users")
     user_permissions: Mapped[List["UserPermission"]] = relationship("UserPermission", back_populates="user", cascade="all, delete-orphan")
     sessions: Mapped[List["UserSession"]] = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")

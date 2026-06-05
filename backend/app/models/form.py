@@ -27,7 +27,7 @@ class Form(Base):
     __tablename__ = "forms"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    client_id: Mapped[int] = mapped_column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)

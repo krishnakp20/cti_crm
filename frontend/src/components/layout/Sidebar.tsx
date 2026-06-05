@@ -7,7 +7,7 @@ import { cn } from '../../utils/cn'
 import {
   LayoutDashboard, Ticket, FileText, Users, Building2, Phone, PhoneCall,
   Bell, BarChart3, Shield, Settings, LogOut, ChevronLeft, ChevronRight,
-  Headphones, Megaphone
+  Headphones, Megaphone, KeyRound
 } from 'lucide-react'
 
 const navGroups = [
@@ -40,6 +40,7 @@ const navGroups = [
     roles: ['admin', 'client'],
     items: [
       { to: '/users', icon: Users, label: 'Users' },
+      { to: '/permissions', icon: KeyRound, label: 'Permissions' },
       { to: '/clients', icon: Building2, label: 'Clients', roles: ['admin'] },
     ],
   },

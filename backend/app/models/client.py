@@ -59,7 +59,7 @@ class Department(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     client: Mapped["Client"] = relationship("Client", back_populates="departments")
-    users: Mapped[List["User"]] = relationship("User", back_populates="department")
+    users: Mapped[List["User"]] = relationship("User", back_populates="department", foreign_keys="User.department_id")
     teams: Mapped[List["Team"]] = relationship("Team", back_populates="department")
 
 

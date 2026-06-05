@@ -17,35 +17,39 @@ async def dashboard_stats(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    client_id = current_user.client_id
+    client_id = current_user.client_id  # None for admin = show all
 
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today - timedelta(days=today.weekday())
 
-    total_tickets = (await db.execute(select(func.count()).where(Ticket.client_id == client_id))).scalar()
-    open_tickets = (await db.execute(select(func.count()).where(Ticket.client_id == client_id, Ticket.status == TicketStatusEnum.OPEN))).scalar()
-    pending_tickets = (await db.execute(select(func.count()).where(Ticket.client_id == client_id, Ticket.status == TicketStatusEnum.PENDING))).scalar()
-    resolved_today = (await db.execute(select(func.count()).where(
-        Ticket.client_id == client_id, Ticket.status == TicketStatusEnum.RESOLVED, Ticket.resolved_at >= today
-    ))).scalar()
-    created_today = (await db.execute(select(func.count()).where(
-        Ticket.client_id == client_id, Ticket.created_at >= today
-    ))).scalar()
-    total_calls = (await db.execute(select(func.count()).where(CallLog.client_id == client_id))).scalar()
-    calls_today = (await db.execute(select(func.count()).where(
-        CallLog.client_id == client_id, CallLog.created_at >= today
-    ))).scalar()
+    def ticket_filter(*extra):
+        if client_id is not None:
+            return [Ticket.client_id == client_id, *extra]
+        return list(extra)
+
+    def call_filter(*extra):
+        if client_id is not None:
+            return [CallLog.client_id == client_id, *extra]
+        return list(extra)
+
+    total_tickets = (await db.execute(select(func.count()).where(*ticket_filter()))).scalar()
+    open_tickets = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.status == TicketStatusEnum.OPEN)))).scalar()
+    pending_tickets = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.status == TicketStatusEnum.PENDING)))).scalar()
+    resolved_today = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.status == TicketStatusEnum.RESOLVED, Ticket.resolved_at >= today)))).scalar()
+    created_today = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.created_at >= today)))).scalar()
+    total_calls = (await db.execute(select(func.count()).where(*call_filter()))).scalar()
+    calls_today = (await db.execute(select(func.count()).where(*call_filter(CallLog.created_at >= today)))).scalar()
 
     result = await db.execute(
         select(Ticket.status, func.count().label("count"))
-        .where(Ticket.client_id == client_id)
+        .where(*ticket_filter())
         .group_by(Ticket.status)
     )
     status_dist = [{"status": r[0], "count": r[1]} for r in result.fetchall()]
 
     result = await db.execute(
         select(Ticket.priority, func.count().label("count"))
-        .where(Ticket.client_id == client_id)
+        .where(*ticket_filter())
         .group_by(Ticket.priority)
     )
     priority_dist = [{"priority": r[0], "count": r[1]} for r in result.fetchall()]
@@ -55,7 +59,7 @@ async def dashboard_stats(
             func.date(Ticket.created_at).label("date"),
             func.count().label("count")
         )
-        .where(Ticket.client_id == client_id, Ticket.created_at >= week_start)
+        .where(*ticket_filter(Ticket.created_at >= week_start))
         .group_by(func.date(Ticket.created_at))
         .order_by(func.date(Ticket.created_at))
     )

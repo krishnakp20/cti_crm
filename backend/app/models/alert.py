@@ -27,7 +27,7 @@ class Alert(Base):
     __tablename__ = "alerts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_id: Mapped[int] = mapped_column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     trigger: Mapped[AlertTrigger] = mapped_column(Enum(AlertTrigger), nullable=False)
     channels: Mapped[List[str]] = mapped_column(JSON, nullable=False)
@@ -59,7 +59,7 @@ class EscalationRule(Base):
     __tablename__ = "escalation_rules"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_id: Mapped[int] = mapped_column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     priority: Mapped[Optional[str]] = mapped_column(String(50))
     department_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("departments.id"))

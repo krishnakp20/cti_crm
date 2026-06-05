@@ -24,6 +24,7 @@ import ReportsPage from './pages/ReportsPage'
 import AuditPage from './pages/AuditPage'
 import AgentPage from './pages/AgentPage'
 import SettingsPage from './pages/SettingsPage'
+import PermissionsPage from './pages/PermissionsPage'
 import NotFoundPage from './pages/NotFoundPage'
 
 
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="/forms/:id/edit" element={<FormBuilderPage />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/users" element={<UsersPage />} />
+        <Route path="/permissions" element={<PermissionsPage />} />
         <Route path="/campaigns" element={<CampaignsPage />} />
         <Route path="/call-logs" element={<CallLogsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
