@@ -39,7 +39,7 @@ class TeamCreate(BaseModel):
     team_lead_id: Optional[int] = None
 
 
-@router.get("/")
+@router.get("")
 async def list_clients(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),

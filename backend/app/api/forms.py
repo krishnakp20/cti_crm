@@ -47,7 +47,7 @@ class FormUpdate(BaseModel):
     fields: Optional[List[FormFieldCreate]] = None
 
 
-@router.get("/")
+@router.get("")
 async def list_forms(
     category: Optional[str] = None,
     current_user: User = Depends(get_current_user),
@@ -63,7 +63,7 @@ async def list_forms(
     return forms
 
 
-@router.post("/")
+@router.post("")
 async def create_form(req: FormCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     # Admin can assign to a client, otherwise use own client_id
     if current_user.role == UserRole.ADMIN and req.assign_to_client_id:

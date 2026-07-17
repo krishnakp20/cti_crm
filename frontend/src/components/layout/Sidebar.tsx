@@ -7,7 +7,7 @@ import { cn } from '../../utils/cn'
 import {
   LayoutDashboard, Ticket, FileText, Users, Building2, Phone, PhoneCall,
   Bell, BarChart3, Shield, Settings, LogOut, ChevronLeft, ChevronRight,
-  Headphones, Megaphone, KeyRound
+  Headphones, Megaphone, KeyRound, X,
 } from 'lucide-react'
 
 const navGroups = [
@@ -48,12 +48,17 @@ const navGroups = [
     label: 'Analytics',
     items: [
       { to: '/reports', icon: BarChart3, label: 'Reports' },
+      { to: '/tickets/report', icon: FileText, label: 'Ticket Export' },
       { to: '/audit', icon: Shield, label: 'Audit Logs', roles: ['admin', 'client'] },
     ],
   },
 ]
 
-export default function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void
+}
+
+export default function Sidebar({ onClose }: SidebarProps) {
   const collapsed = useSelector((s: RootState) => s.ui.sidebarCollapsed)
   const user = useSelector((s: RootState) => s.auth.user)
   const dispatch = useDispatch()
@@ -68,10 +73,15 @@ export default function Sidebar() {
 
   return (
     <aside className={cn(
-      'flex flex-col bg-white dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800 transition-all duration-200 h-screen',
-      collapsed ? 'w-14' : 'w-56'
-    )}>
-      <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100 dark:border-gray-800">
+      'flex flex-col bg-white dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800 h-screen',
+      // On desktop respect collapsed state; on mobile always full width
+      'transition-all duration-200',
+      collapsed ? 'w-14' : 'w-56',
+      'lg:w-auto', // let desktop width be controlled by collapsed state
+    )} style={{ width: collapsed ? '3.5rem' : '14rem' }}>
+
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
         {!collapsed && (
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0">
@@ -89,19 +99,38 @@ export default function Sidebar() {
             </svg>
           </div>
         )}
-        {!collapsed && (
-          <button onClick={() => dispatch(toggleSidebar())} className="btn-icon ml-auto">
-            <ChevronLeft className="w-4 h-4" />
+
+        <div className="flex items-center gap-1 ml-auto">
+          {/* Mobile close button */}
+          {onClose && (
+            <button onClick={onClose} className="btn-icon lg:hidden">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+          {/* Desktop collapse toggle */}
+          <button
+            onClick={() => dispatch(toggleSidebar())}
+            className="btn-icon hidden lg:flex"
+          >
+            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </button>
-        )}
+        </div>
       </div>
 
-      {collapsed && (
-        <button onClick={() => dispatch(toggleSidebar())} className="btn-icon mx-auto mt-2">
-          <ChevronRight className="w-4 h-4" />
-        </button>
+      {/* User pill (mobile only, below header) */}
+      {!collapsed && (
+        <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 lg:hidden">
+          <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+            {user?.full_name?.charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">{user?.full_name}</p>
+            <p className="text-2xs text-gray-400 capitalize">{user?.role?.replace('_', ' ')}</p>
+          </div>
+        </div>
       )}
 
+      {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
         {navGroups.map(group => {
           if (!canSee(group.roles as string[])) return null
@@ -134,7 +163,8 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-gray-100 dark:border-gray-800 p-2 space-y-0.5">
+      {/* Bottom */}
+      <div className="border-t border-gray-100 dark:border-gray-800 p-2 space-y-0.5 flex-shrink-0">
         <NavLink
           to="/settings"
           className={({ isActive }) => cn('sidebar-item', isActive && 'sidebar-item-active', collapsed && 'justify-center px-2')}

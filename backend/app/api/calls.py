@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 from typing import Optional
@@ -194,6 +194,245 @@ async def dialer_webhook(payload: dict, db: AsyncSession = Depends(get_db)):
         )
         await db.commit()
     return {"status": "ok"}
+
+
+@router.post("/dialer/call-arrived")
+async def call_arrived(payload: dict, db: AsyncSession = Depends(get_db)):
+    """
+    ViciBox AGI calls this when a call is connected to an agent.
+    Payload: { agent_extension, caller_id, caller_name, uniqueid, campaign_id? }
+    Pushes a WebSocket 'call_arrive' event to the matching agent's browser.
+    """
+    from app.websocket.manager import manager
+
+    extension = payload.get("agent_extension") or payload.get("extension")
+    caller_id = payload.get("caller_id") or payload.get("callerid") or payload.get("phone")
+    caller_name = payload.get("caller_name") or payload.get("callername") or ""
+    uniqueid = payload.get("uniqueid") or payload.get("call_id") or ""
+    campaign_id = payload.get("campaign_id")
+    client_id = payload.get("client_id")
+
+    if not extension or not caller_id:
+        return {"status": "error", "message": "agent_extension and caller_id are required"}
+
+    # Find agent by extension
+    q = select(User).where(User.extension == extension, User.is_active == True)
+    result = await db.execute(q)
+    agent = result.scalar_one_or_none()
+
+    if not agent:
+        return {"status": "error", "message": f"No active agent with extension {extension}"}
+
+    # Look up upload record by phone for pre-filled data
+    customer_data: dict = {}
+    clean_phone = caller_id.replace("+91", "").replace("+", "").replace(" ", "").replace("-", "").strip()
+    from app.models.call import UploadRecord
+    phone_q = select(UploadRecord).where(
+        UploadRecord.mobile.like(f"%{clean_phone[-10:]}%") if len(clean_phone) >= 10 else UploadRecord.mobile == clean_phone
+    ).order_by(UploadRecord.created_at.desc()).limit(1)
+    rec_result = await db.execute(phone_q)
+    record = rec_result.scalar_one_or_none()
+    if record:
+        customer_data = {
+            "name": record.name,
+            "email": record.email or "",
+            "city": record.city or "",
+            "remarks": record.remarks or "",
+        }
+
+    # Find agent's assigned form (client's active form for category=ticket)
+    form_data = None
+    if agent.client_id:
+        from app.models.form import Form, FormField
+        form_q = select(Form).where(
+            Form.client_id == agent.client_id,
+            Form.is_active == True,
+            Form.category == "ticket",
+        ).order_by(Form.created_at.desc()).limit(1)
+        form_res = await db.execute(form_q)
+        form = form_res.scalar_one_or_none()
+        if form:
+            fields_res = await db.execute(
+                select(FormField).where(FormField.form_id == form.id).order_by(FormField.order)
+            )
+            fields = fields_res.scalars().all()
+            form_data = {
+                "id": form.id,
+                "name": form.name,
+                "fields": [
+                    {
+                        "id": f.id,
+                        "label": f.label,
+                        "field_name": f.field_name,
+                        "field_type": f.field_type.value if hasattr(f.field_type, 'value') else str(f.field_type),
+                        "placeholder": f.placeholder,
+                        "options": f.options,
+                        "is_required": f.is_required,
+                        "order": f.order,
+                    }
+                    for f in fields
+                ],
+            }
+
+    # Push WebSocket event to agent's browser
+    ws_payload = {
+        "type": "call_arrive",
+        "uniqueid": uniqueid,
+        "caller_id": caller_id,
+        "caller_name": caller_name,
+        "campaign_id": campaign_id,
+        "customer": customer_data,
+        "form": form_data,
+    }
+    await manager.send_to_user(agent.id, ws_payload)
+
+    # Create a call log entry
+    log = CallLog(
+        client_id=agent.client_id,
+        agent_id=agent.id,
+        phone_number=caller_id,
+        direction="inbound",
+        dialer_call_id=uniqueid,
+        campaign_id=campaign_id,
+        status="answered",
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(log)
+
+    return {"status": "ok", "agent_id": agent.id, "call_log_id": log.id}
+
+
+@router.get("/dialer/vd-hook")
+async def vicidial_start_call_hook(
+    request: "Request",
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    ViciDial Start Call URL hook (GET) — captures ALL query params ViciDial sends.
+    Set in campaign: Start Call URL = http://YOUR_IP:8001/api/v1/calls/dialer/vd-hook?agent=--A--&phone=--D--&name=--N--&call_id=--X--&campaign=--C--
+    """
+    from app.websocket.manager import manager
+    import logging
+
+    all_params = dict(request.query_params)
+    logging.warning(f"[VD-HOOK] ALL PARAMS FROM VICIDIAL: {all_params}")
+    print(f"\n{'='*60}\n[VD-HOOK] ViciDial sent these params:\n{all_params}\n{'='*60}\n")
+
+    agent = all_params.get("agent", "")
+    phone = all_params.get("phone", "")
+    name = all_params.get("name", "")
+    call_id = all_params.get("call_id", "")
+    campaign = all_params.get("campaign", "")
+
+    # Find agent by dialer_user (ViciDial login) first, then fall back to extension
+    q = select(User).where(User.dialer_user == agent, User.is_active == True)
+    result = await db.execute(q)
+    db_agent = result.scalars().first()
+
+    if not db_agent:
+        return {"status": "error", "message": f"No CTI agent mapped to ViciDial user '{agent}'. Set your Dialer User ID in Agent Panel settings."}
+
+    # Customer lookup by phone
+    customer_data: dict = {}
+    clean_phone = phone.replace("+91", "").replace("+", "").replace(" ", "").replace("-", "").strip()
+    from app.models.call import UploadRecord
+    phone_q = select(UploadRecord).where(
+        UploadRecord.mobile.like(f"%{clean_phone[-10:]}%") if len(clean_phone) >= 10 else UploadRecord.mobile == clean_phone
+    ).order_by(UploadRecord.created_at.desc()).limit(1)
+    rec_result = await db.execute(phone_q)
+    record = rec_result.scalar_one_or_none()
+    if record:
+        customer_data = {"name": record.name, "email": record.email or "", "city": record.city or ""}
+    elif name:
+        customer_data = {"name": name}
+
+    # Find active ticket form for agent's client
+    form_data = None
+    if db_agent.client_id:
+        from app.models.form import Form, FormField
+        form_res = await db.execute(
+            select(Form).where(Form.client_id == db_agent.client_id, Form.is_active == True, Form.category == "ticket")
+            .order_by(Form.created_at.desc()).limit(1)
+        )
+        form = form_res.scalar_one_or_none()
+        if form:
+            fields_res = await db.execute(
+                select(FormField).where(FormField.form_id == form.id).order_by(FormField.order)
+            )
+            fields = fields_res.scalars().all()
+            form_data = {
+                "id": form.id, "name": form.name,
+                "fields": [
+                    {
+                        "id": f.id, "label": f.label, "field_name": f.field_name,
+                        "field_type": f.field_type.value if hasattr(f.field_type, "value") else str(f.field_type),
+                        "placeholder": f.placeholder, "options": f.options,
+                        "is_required": f.is_required, "order": f.order,
+                    }
+                    for f in fields
+                ],
+            }
+
+    await manager.send_to_user(db_agent.id, {
+        "type": "call_arrive",
+        "uniqueid": call_id,
+        "caller_id": phone,
+        "caller_name": name,
+        "campaign_id": campaign or None,
+        "customer": customer_data,
+        "form": form_data,
+    })
+
+    log = CallLog(
+        client_id=db_agent.client_id, agent_id=db_agent.id,
+        phone_number=phone, direction="inbound", dialer_call_id=call_id or None,
+        status="answered",
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(log)
+    return {"status": "ok", "agent_id": db_agent.id, "call_log_id": log.id}
+
+
+@router.patch("/dialer/set-dialer-user")
+async def set_dialer_user(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent sets their ViciDial agent user ID."""
+    du = data.get("dialer_user", "").strip()
+    await db.execute(update(User).where(User.id == current_user.id).values(dialer_user=du or None))
+    await db.commit()
+    return {"status": "ok", "dialer_user": du or None}
+
+
+@router.get("/dialer/agent-status")
+async def agent_dialer_status(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Returns the current agent's extension and dialer config."""
+    return {
+        "agent_id": current_user.id,
+        "extension": current_user.extension,
+        "dialer_user": current_user.dialer_user,
+        "name": current_user.full_name,
+        "role": current_user.role,
+    }
+
+
+@router.patch("/dialer/set-extension")
+async def set_extension(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent sets their own ViciBox extension number."""
+    ext = data.get("extension", "").strip()
+    await db.execute(
+        update(User).where(User.id == current_user.id).values(extension=ext or None)
+    )
+    await db.commit()
+    return {"status": "ok", "extension": ext or None}
 
 
 async def push_to_dialer(campaign_id: int, batch_id: int):

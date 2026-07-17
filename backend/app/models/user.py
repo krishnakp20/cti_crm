@@ -38,6 +38,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     extra_data: Mapped[Optional[dict]] = mapped_column(JSON)
+    extension: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # ViciBox SIP extension
+    dialer_user: Mapped[Optional[str]] = mapped_column(String(100), index=True)  # ViciDial agent login (e.g. "1001")
 
     client: Mapped[Optional["Client"]] = relationship("Client", back_populates="users", foreign_keys=[client_id])
     department: Mapped[Optional["Department"]] = relationship("Department", back_populates="users", foreign_keys=[department_id])

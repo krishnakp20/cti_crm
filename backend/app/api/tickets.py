@@ -28,6 +28,7 @@ class TicketCreateRequest(BaseModel):
     assigned_to: Optional[int] = None
     tags: Optional[List[str]] = None
     call_log_id: Optional[int] = None
+    dialer_call_id: Optional[str] = None  # ViciBox call unique ID
     client_id: Optional[int] = None  # admin can specify client
 
 
@@ -48,7 +49,89 @@ class CommentRequest(BaseModel):
     is_internal: bool = False
 
 
-@router.get("/")
+@router.get("/export")
+async def export_tickets(
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export all tickets with form fields as CSV."""
+    import csv, io
+    from fastapi.responses import StreamingResponse
+
+    q = select(Ticket)
+    if current_user.role != UserRole.ADMIN:
+        q = q.where(Ticket.client_id == current_user.client_id)
+    if current_user.role == UserRole.AGENT:
+        q = q.where(or_(Ticket.assigned_to == current_user.id, Ticket.created_by == current_user.id))
+    if status:
+        q = q.where(Ticket.status == status)
+    if priority:
+        q = q.where(Ticket.priority == priority)
+    if from_date:
+        q = q.where(Ticket.created_at >= from_date)
+    if to_date:
+        q = q.where(Ticket.created_at <= to_date)
+
+    q = q.order_by(Ticket.created_at.desc())
+    result = await db.execute(q)
+    tickets = result.scalars().all()
+
+    # Collect all unique form_data keys across all tickets
+    form_keys: list = []
+    seen: set = set()
+    for t in tickets:
+        if t.form_data and isinstance(t.form_data, dict):
+            for k in t.form_data.keys():
+                if k not in seen:
+                    seen.add(k)
+                    form_keys.append(k)
+
+    base_cols = [
+        'ticket_number', 'subject', 'status', 'priority',
+        'customer_name', 'customer_email', 'customer_mobile',
+        'description', 'created_at', 'updated_at',
+    ]
+    headers = base_cols + form_keys
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=headers, extrasaction='ignore')
+    writer.writeheader()
+
+    for t in tickets:
+        row = {
+            'ticket_number': t.ticket_number or '',
+            'subject': t.subject or '',
+            'status': t.status.value if hasattr(t.status, 'value') else str(t.status),
+            'priority': t.priority.value if hasattr(t.priority, 'value') else str(t.priority),
+            'customer_name': t.customer_name or '',
+            'customer_email': t.customer_email or '',
+            'customer_mobile': t.customer_mobile or '',
+            'description': (t.description or '').replace('\n', ' '),
+            'created_at': t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '',
+            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M') if t.updated_at else '',
+        }
+        if t.form_data and isinstance(t.form_data, dict):
+            for k in form_keys:
+                val = t.form_data.get(k, '')
+                if isinstance(val, list):
+                    val = ', '.join(val)
+                row[k] = val or ''
+        writer.writerow(row)
+
+    output.seek(0)
+    filename = f"tickets_export_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("")
 async def list_tickets(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -98,7 +181,7 @@ async def list_tickets(
     return {"total": total, "page": page, "limit": limit, "items": tickets}
 
 
-@router.post("/")
+@router.post("")
 async def create_ticket(
     req: TicketCreateRequest,
     background_tasks: BackgroundTasks,
@@ -109,7 +192,8 @@ async def create_ticket(
     effective_client_id = req.client_id or current_user.client_id
     ticket_number = await generate_ticket_number(db, effective_client_id)
     data = req.model_dump(exclude_none=True)
-    data.pop('client_id', None)  # remove to avoid duplicate kwarg
+    data.pop('client_id', None)      # handled separately as effective_client_id
+    dialer_call_id = data.pop('dialer_call_id', None)
     ticket = Ticket(
         ticket_number=ticket_number,
         client_id=effective_client_id,
@@ -122,6 +206,17 @@ async def create_ticket(
     # Set SLA due date based on priority
     from app.services.alert_service import set_ticket_sla
     await set_ticket_sla(ticket, db)
+
+    # Link ticket back to its originating call log (best-effort)
+    if dialer_call_id:
+        try:
+            from app.models.call import CallLog
+            await db.execute(
+                update(CallLog).where(CallLog.dialer_call_id == dialer_call_id).values(ticket_id=ticket.id)
+            )
+        except Exception as link_err:
+            from loguru import logger
+            logger.warning(f"Could not link call log to ticket: {link_err}")
 
     log = TicketLog(ticket_id=ticket.id, user_id=current_user.id, action="created", new_value="Ticket created")
     db.add(log)

@@ -74,12 +74,28 @@
     @apply hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-colors;
   }
   .th {
-    @apply px-3 py-2 text-left text-2xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider;
+    @apply px-3 py-2 text-left text-2xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap;
   }
   .td {
     @apply px-3 py-2 text-sm text-gray-700 dark:text-gray-300;
   }
   .stat-card {
-    @apply card p-4 flex items-start gap-3;
+    @apply card p-3 sm:p-4 flex items-start gap-3;
   }
+  /* Modal overlay — full screen on mobile */
+  .modal-overlay {
+    @apply fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4;
+  }
+  .modal-box {
+    @apply bg-white dark:bg-gray-900 w-full sm:rounded-xl sm:max-w-lg rounded-t-2xl shadow-2xl max-h-[90vh] overflow-y-auto;
+  }
+}
+
+/* Prevent horizontal overflow on all pages */
+* {
+  box-sizing: border-box;
+}
+html, body, #root {
+  max-width: 100vw;
+  overflow-x: hidden;
 }

@@ -107,7 +107,7 @@ async def toggle_escalation(rule_id: int, current_user: User = Depends(get_curre
 
 # ── ROOT LIST + CREATE ──────────────────────────────────────────────────────
 
-@router.get("/")
+@router.get("")
 async def list_alerts(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     q = select(Alert)
     if current_user.role != UserRole.ADMIN and current_user.client_id:
@@ -116,7 +116,7 @@ async def list_alerts(current_user: User = Depends(get_current_user), db: AsyncS
     return result.scalars().all()
 
 
-@router.post("/")
+@router.post("")
 async def create_alert(req: AlertCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     alert = Alert(client_id=current_user.client_id, **req.model_dump(exclude_none=True))
     db.add(alert)

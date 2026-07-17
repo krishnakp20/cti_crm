@@ -89,7 +89,7 @@ async def assign_role_permissions(
 
 # ── LIST + CREATE ───────────────────────────────────────────────────────────
 
-@router.get("/")
+@router.get("")
 async def list_users(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -136,7 +136,7 @@ async def list_users(
     }
 
 
-@router.post("/")
+@router.post("")
 async def create_user(req: UserCreateRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == req.email))
     if result.scalar_one_or_none():

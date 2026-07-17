@@ -13,6 +13,7 @@ import DashboardPage from './pages/DashboardPage'
 import TicketsPage from './pages/tickets/TicketsPage'
 import TicketDetailPage from './pages/tickets/TicketDetailPage'
 import TicketNewPage from './pages/tickets/TicketNewPage'
+import TicketReportPage from './pages/tickets/TicketReportPage'
 import FormsPage from './pages/forms/FormsPage'
 import FormBuilderPage from './pages/forms/FormBuilderPage'
 import ClientsPage from './pages/admin/ClientsPage'
@@ -58,6 +59,7 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="/tickets" element={<TicketsPage />} />
         <Route path="/tickets/new" element={<TicketNewPage />} />
+        <Route path="/tickets/report" element={<TicketReportPage />} />
         <Route path="/tickets/:id" element={<TicketDetailPage />} />
         <Route path="/forms" element={<FormsPage />} />
         <Route path="/forms/new" element={<FormBuilderPage />} />

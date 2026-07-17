@@ -18,23 +18,21 @@ const queryClient = new QueryClient({
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <Provider store={store}>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <App />
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              duration: 3000,
-              style: {
-                fontSize: '0.8125rem',
-                padding: '8px 12px',
-              },
-            }}
-          />
-        </BrowserRouter>
-      </QueryClientProvider>
-    </Provider>
-  </React.StrictMode>,
+  <Provider store={store}>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <App />
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            duration: 3000,
+            style: {
+              fontSize: '0.8125rem',
+              padding: '8px 12px',
+            },
+          }}
+        />
+      </BrowserRouter>
+    </QueryClientProvider>
+  </Provider>,
 )

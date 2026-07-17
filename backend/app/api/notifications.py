@@ -10,7 +10,7 @@ from app.models.notification import Notification
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 
-@router.get("/")
+@router.get("")
 async def list_notifications(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),

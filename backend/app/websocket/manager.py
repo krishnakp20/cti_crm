@@ -1,7 +1,15 @@
 from typing import Dict, List, Set
 from fastapi import WebSocket
 import json
+import enum
 from loguru import logger
+
+
+class _EnumEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, enum.Enum):
+            return obj.value
+        return super().default(obj)
 
 
 class ConnectionManager:
@@ -33,7 +41,7 @@ class ConnectionManager:
             dead = []
             for ws in self.active_connections[user_id]:
                 try:
-                    await ws.send_text(json.dumps(message))
+                    await ws.send_text(json.dumps(message, cls=_EnumEncoder))
                 except Exception:
                     dead.append(ws)
             for ws in dead:
