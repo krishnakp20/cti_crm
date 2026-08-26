@@ -134,7 +134,7 @@ async def export_tickets(
 @router.get("")
 async def list_tickets(
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     status: Optional[str] = None,
     priority: Optional[str] = None,
     assigned_to: Optional[int] = None,
@@ -142,12 +142,15 @@ async def list_tickets(
     search: Optional[str] = None,
     from_date: Optional[datetime] = None,
     to_date: Optional[datetime] = None,
+    client_id: Optional[int] = None,  # admin filter
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Ticket)
     if current_user.role != UserRole.ADMIN:
         q = q.where(Ticket.client_id == current_user.client_id)
+    elif client_id:
+        q = q.where(Ticket.client_id == client_id)
     if current_user.role == UserRole.AGENT:
         q = q.where(or_(Ticket.assigned_to == current_user.id, Ticket.created_by == current_user.id))
     if status:

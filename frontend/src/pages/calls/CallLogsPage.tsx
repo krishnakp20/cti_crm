@@ -3,6 +3,7 @@ import { callsApi } from '../../services/api'
 import { Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '../../utils/cn'
+import { useAdminClient } from '../../hooks/useAdminClient'
 
 const STATUS_ICONS: any = {
   completed: { icon: PhoneOutgoing, cls: 'text-green-600' },
@@ -19,9 +20,10 @@ function formatDuration(secs: number) {
 }
 
 export default function CallLogsPage() {
+  const { clientFilter, adminClientId } = useAdminClient()
   const { data, isLoading } = useQuery({
-    queryKey: ['call-logs'],
-    queryFn: () => callsApi.listLogs({ limit: 50 }).then(r => r.data),
+    queryKey: ['call-logs', adminClientId],
+    queryFn: () => callsApi.listLogs({ limit: 50, ...clientFilter }).then(r => r.data),
   })
 
   const logs = data?.items || []

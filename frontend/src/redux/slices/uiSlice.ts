@@ -4,6 +4,8 @@ interface UIState {
   theme: 'light' | 'dark'
   sidebarCollapsed: boolean
   activeModal: string | null
+  adminClientId: number | null      // which client admin is currently viewing (null = all)
+  adminClientName: string | null
 }
 
 const theme = (localStorage.getItem('theme') as 'light' | 'dark') || 'light'
@@ -14,6 +16,8 @@ const uiSlice = createSlice({
     theme,
     sidebarCollapsed: false,
     activeModal: null,
+    adminClientId: null,
+    adminClientName: null,
   } as UIState,
   reducers: {
     toggleTheme(state) {
@@ -27,8 +31,12 @@ const uiSlice = createSlice({
     setModal(state, action: PayloadAction<string | null>) {
       state.activeModal = action.payload
     },
+    setAdminClient(state, action: PayloadAction<{ id: number | null; name: string | null }>) {
+      state.adminClientId = action.payload.id
+      state.adminClientName = action.payload.name
+    },
   },
 })
 
-export const { toggleTheme, toggleSidebar, setModal } = uiSlice.actions
+export const { toggleTheme, toggleSidebar, setModal, setAdminClient } = uiSlice.actions
 export default uiSlice.reducer

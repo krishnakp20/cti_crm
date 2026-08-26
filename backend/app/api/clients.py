@@ -11,6 +11,16 @@ from app.models.client import Client, ClientStatus, Department, Team
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
+class ClientCreateRequest(BaseModel):
+    company_name: str
+    email: str
+    admin_name: str
+    admin_email: str
+    admin_password: str
+    mobile: Optional[str] = None
+    max_agents: int = 10
+
+
 class ClientUpdateRequest(BaseModel):
     company_name: Optional[str] = None
     mobile: Optional[str] = None
@@ -37,6 +47,45 @@ class TeamCreate(BaseModel):
     description: Optional[str] = None
     department_id: Optional[int] = None
     team_lead_id: Optional[int] = None
+
+
+@router.post("")
+async def create_client(
+    req: ClientCreateRequest,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    import re
+    from app.core.security import get_password_hash
+
+    existing = await db.execute(select(User).where(User.email == req.admin_email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Admin email already in use")
+
+    slug = re.sub(r'[^a-z0-9]', '-', req.company_name.lower())
+    client = Client(
+        company_name=req.company_name,
+        slug=slug,
+        email=req.email,
+        mobile=req.mobile,
+        max_agents=req.max_agents,
+        status=ClientStatus.ACTIVE,
+    )
+    db.add(client)
+    await db.flush()
+
+    admin_user = User(
+        email=req.admin_email,
+        full_name=req.admin_name,
+        hashed_password=get_password_hash(req.admin_password),
+        role=UserRole.CLIENT,
+        client_id=client.id,
+        is_active=True,
+    )
+    db.add(admin_user)
+    await db.commit()
+    await db.refresh(client)
+    return {"message": "Client created", "client_id": client.id, "company_name": client.company_name}
 
 
 @router.get("")

@@ -40,12 +40,18 @@ class EscalationRuleCreate(BaseModel):
 # ── STATIC ROUTES FIRST ────────────────────────────────────────────────────
 
 @router.get("/templates")
-async def list_templates(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(AlertTemplate).where(
-            (AlertTemplate.client_id == current_user.client_id) | (AlertTemplate.is_system == True)
+async def list_templates(client_id: Optional[int] = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from fastapi import Query as FQuery
+    if current_user.role == UserRole.ADMIN:
+        effective_client_id = client_id
+    else:
+        effective_client_id = current_user.client_id
+    q = select(AlertTemplate).where(AlertTemplate.is_system == True)
+    if effective_client_id:
+        q = select(AlertTemplate).where(
+            (AlertTemplate.client_id == effective_client_id) | (AlertTemplate.is_system == True)
         )
-    )
+    result = await db.execute(q)
     return result.scalars().all()
 
 
@@ -59,10 +65,12 @@ async def create_template(req: AlertTemplateCreate, current_user: User = Depends
 
 
 @router.get("/escalations")
-async def list_escalations(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_escalations(client_id: Optional[int] = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     q = select(EscalationRule)
     if current_user.role != UserRole.ADMIN and current_user.client_id:
         q = q.where(EscalationRule.client_id == current_user.client_id)
+    elif current_user.role == UserRole.ADMIN and client_id:
+        q = q.where(EscalationRule.client_id == client_id)
     result = await db.execute(q.order_by(EscalationRule.id))
     return result.scalars().all()
 
@@ -108,10 +116,12 @@ async def toggle_escalation(rule_id: int, current_user: User = Depends(get_curre
 # ── ROOT LIST + CREATE ──────────────────────────────────────────────────────
 
 @router.get("")
-async def list_alerts(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_alerts(client_id: Optional[int] = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     q = select(Alert)
     if current_user.role != UserRole.ADMIN and current_user.client_id:
         q = q.where(Alert.client_id == current_user.client_id)
+    elif current_user.role == UserRole.ADMIN and client_id:
+        q = q.where(Alert.client_id == client_id)
     result = await db.execute(q.order_by(Alert.id))
     return result.scalars().all()
 

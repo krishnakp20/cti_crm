@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersApi } from '../services/api'
+import api from '../services/api'
+import { useAdminClient } from '../hooks/useAdminClient'
 import toast from 'react-hot-toast'
 import { Shield, Plus, X, Check, Loader2, ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '../utils/cn'
@@ -28,9 +30,14 @@ export default function PermissionsPage() {
   const [tab, setTab] = useState<'roles' | 'users'>('roles')
   const qc = useQueryClient()
 
+  const { adminClientId, clientFilter } = useAdminClient()
+
   const { data: roles } = useQuery({ queryKey: ['roles'], queryFn: () => usersApi.listRoles().then(r => r.data) })
   const { data: permissions } = useQuery({ queryKey: ['permissions'], queryFn: () => usersApi.listPermissions().then(r => r.data) })
-  const { data: users } = useQuery({ queryKey: ['users-list'], queryFn: () => usersApi.list({ limit: 100 }).then(r => r.data) })
+  const { data: users } = useQuery({
+    queryKey: ['users-list', adminClientId],
+    queryFn: () => usersApi.list({ limit: 100, ...clientFilter }).then(r => r.data),
+  })
 
   // Group permissions by module
   const grouped = (permissions || []).reduce((acc: any, p: any) => {
@@ -63,11 +70,19 @@ export default function PermissionsPage() {
     },
   })
 
-  const selectRole = async (role: any) => {
+  const selectRole = useCallback(async (role: any) => {
     setSelectedRole(role)
-    // Load existing permissions for this role from API response if available
-    setRolePermissions([])
-  }
+    // Load existing granted permissions for this role
+    try {
+      const res = await api.get(`/users/roles/${role.id}/permissions`)
+      const granted = (res.data || [])
+        .filter((rp: any) => rp.granted)
+        .map((rp: any) => rp.permission_id)
+      setRolePermissions(granted)
+    } catch {
+      setRolePermissions([])
+    }
+  }, [])
 
   const togglePerm = (permId: number) => {
     setRolePermissions(prev =>

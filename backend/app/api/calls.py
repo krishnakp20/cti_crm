@@ -126,10 +126,16 @@ async def list_call_logs(
     limit: int = Query(20, ge=1, le=100),
     agent_id: Optional[int] = None,
     campaign_id: Optional[int] = None,
+    client_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(CallLog).where(CallLog.client_id == current_user.client_id)
+    if current_user.role == UserRole.ADMIN and client_id:
+        q = select(CallLog).where(CallLog.client_id == client_id)
+    elif current_user.role == UserRole.ADMIN:
+        q = select(CallLog)
+    else:
+        q = select(CallLog).where(CallLog.client_id == current_user.client_id)
     if agent_id:
         q = q.where(CallLog.agent_id == agent_id)
     if campaign_id:

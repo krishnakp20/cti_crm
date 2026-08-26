@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { setAuth } from '../../redux/slices/authSlice'
 import { authApi } from '../../services/api'
 import toast from 'react-hot-toast'
-import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2, LogIn, Mail, Lock } from 'lucide-react'
 
 interface LoginForm {
   email: string
@@ -22,7 +22,7 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginForm) => {
     setLoading(true)
     try {
-      const res = await authApi.login(data.email, data.password)
+      const res = await authApi.login(data.email.trim(), data.password.trim())
       dispatch(setAuth({
         user: res.data.user,
         accessToken: res.data.access_token,
@@ -37,53 +37,79 @@ export default function LoginPage() {
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white">Sign in</h2>
-        <p className="text-xs text-gray-500 mt-0.5">Enter your credentials to continue</p>
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">Sign in</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Welcome back — enter your credentials to continue</p>
       </div>
 
       <div>
-        <label className="label">Email</label>
-        <input
-          type="email"
-          {...register('email', { required: 'Email is required' })}
-          className="input"
-          placeholder="admin@example.com"
-          autoComplete="email"
-        />
-        {errors.email && <p className="text-2xs text-red-500 mt-1">{errors.email.message}</p>}
+        <label className="label">Email Address</label>
+        <div className="relative">
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="email"
+            {...register('email', { required: 'Email is required' })}
+            className="input pl-9"
+            placeholder="you@company.com"
+            autoComplete="email"
+          />
+        </div>
+        {errors.email && <p className="text-2xs text-brand-500 mt-1.5 flex items-center gap-1">{errors.email.message}</p>}
       </div>
 
       <div>
         <label className="label">Password</label>
         <div className="relative">
+          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type={showPass ? 'text' : 'password'}
             {...register('password', { required: 'Password is required' })}
-            className="input pr-9"
+            className="input pl-9 pr-10"
             placeholder="••••••••"
             autoComplete="current-password"
           />
-          <button type="button" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setShowPass(v => !v)}>
+          <button
+            type="button"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+            onClick={() => setShowPass(v => !v)}
+          >
             {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
-        {errors.password && <p className="text-2xs text-red-500 mt-1">{errors.password.message}</p>}
+        {errors.password && <p className="text-2xs text-brand-500 mt-1.5">{errors.password.message}</p>}
       </div>
 
-      <button type="submit" disabled={loading} className="btn-primary w-full justify-center">
-        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sign in'}
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-navy hover:shadow-lg"
+        style={{ background: loading ? '#003347' : 'linear-gradient(135deg, #004f6a 0%, #003347 100%)' }}
+      >
+        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+        {loading ? 'Signing in…' : 'Sign in'}
       </button>
 
-      <p className="text-center text-xs text-gray-500">
+      <p className="text-center text-sm text-gray-500 pt-1">
         Don't have an account?{' '}
-        <Link to="/register" className="text-primary-600 hover:underline font-medium">Register your company</Link>
+        <Link to="/register" className="font-semibold hover:underline" style={{ color: '#004058' }}>
+          Register your company
+        </Link>
       </p>
 
-      <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-        <p className="text-2xs text-gray-500 font-medium mb-1">Demo credentials</p>
-        <p className="text-2xs text-gray-600 dark:text-gray-400">Admin: admin@cti-crm.com / Admin@123</p>
+      {/* Demo credentials */}
+      <div className="mt-2 rounded-xl p-4 space-y-2" style={{ background: '#f0f6fa', border: '1px solid #d0e5ef' }}>
+        <p className="text-2xs font-bold text-gray-500 uppercase tracking-wider mb-2">Demo Credentials</p>
+        {[
+          { role: 'System Admin', email: 'admin@cti-crm.com', pass: 'Admin@123' },
+          { role: 'Client Admin', email: 'admin@sheeshagreen.com', pass: 'Admin@123' },
+          { role: 'Agent', email: 'pankhuri@sheeshagreen.com', pass: 'Agent@123' },
+        ].map(c => (
+          <div key={c.email} className="flex items-center gap-2">
+            <span className="text-2xs font-semibold text-gray-500 w-24 flex-shrink-0">{c.role}</span>
+            <span className="text-2xs font-mono text-gray-700 truncate">{c.email} / {c.pass}</span>
+          </div>
+        ))}
       </div>
     </form>
   )

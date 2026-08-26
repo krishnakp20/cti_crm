@@ -19,6 +19,12 @@ class UserCreateRequest(BaseModel):
     role: UserRole
     department_id: Optional[int] = None
     role_id: Optional[int] = None
+    client_id: Optional[int] = None
+    dialer_user: Optional[str] = None
+    connection_type: Optional[str] = "remote"
+    agent_mobile: Optional[str] = None
+    sip_password: Optional[str] = None
+    sip_server_url: Optional[str] = None
 
 
 class UserUpdateRequest(BaseModel):
@@ -28,6 +34,11 @@ class UserUpdateRequest(BaseModel):
     role_id: Optional[int] = None
     is_active: Optional[bool] = None
     avatar_url: Optional[str] = None
+    dialer_user: Optional[str] = None
+    connection_type: Optional[str] = None
+    agent_mobile: Optional[str] = None
+    sip_password: Optional[str] = None
+    sip_server_url: Optional[str] = None
 
 
 class RoleCreateRequest(BaseModel):
@@ -63,6 +74,16 @@ async def list_permissions(current_user: User = Depends(get_current_user), db: A
     return result.scalars().all()
 
 
+@router.get("/roles/{role_id}/permissions")
+async def get_role_permissions(
+    role_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(RolePermission).where(RolePermission.role_id == role_id))
+    return [{"permission_id": rp.permission_id, "granted": rp.granted} for rp in result.scalars().all()]
+
+
 @router.post("/roles/{role_id}/permissions")
 async def assign_role_permissions(
     role_id: int,
@@ -95,12 +116,15 @@ async def list_users(
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
     role: Optional[str] = None,
+    client_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(User)
     if current_user.role != UserRole.ADMIN:
         q = q.where(User.client_id == current_user.client_id)
+    elif client_id:
+        q = q.where(User.client_id == client_id)
     if search:
         q = q.where((User.full_name.ilike(f"%{search}%")) | (User.email.ilike(f"%{search}%")))
     if role:
@@ -130,6 +154,11 @@ async def list_users(
                 "client_id": u.client_id,
                 "created_at": u.created_at,
                 "last_login": u.last_login,
+                "dialer_user": u.dialer_user,
+                "extension": u.extension,
+                "connection_type": u.connection_type or "remote",
+                "agent_mobile": u.agent_mobile,
+                "sip_server_url": u.sip_server_url,
             }
             for u in users
         ],
@@ -142,7 +171,10 @@ async def create_user(req: UserCreateRequest, current_user: User = Depends(get_c
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already exists")
 
-    client_id = None if current_user.role == UserRole.ADMIN else current_user.client_id
+    if current_user.role == UserRole.ADMIN:
+        client_id = req.client_id  # admin can assign to any client
+    else:
+        client_id = current_user.client_id
     user = User(
         email=req.email,
         full_name=req.full_name,
@@ -152,12 +184,37 @@ async def create_user(req: UserCreateRequest, current_user: User = Depends(get_c
         client_id=client_id,
         department_id=req.department_id,
         role_id=req.role_id,
+        dialer_user=req.dialer_user,
+        connection_type=req.connection_type or "remote",
+        agent_mobile=req.agent_mobile,
+        sip_password=req.sip_password,
+        sip_server_url=req.sip_server_url,
         is_active=True,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
     return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role}
+
+
+class DialerSettingsRequest(BaseModel):
+    connection_type: Optional[str] = None
+    agent_mobile: Optional[str] = None
+    sip_server_url: Optional[str] = None
+    sip_password: Optional[str] = None
+
+
+@router.patch("/me/dialer-settings")
+async def update_my_dialer_settings(
+    req: DialerSettingsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    data = req.model_dump(exclude_none=True)
+    if data:
+        await db.execute(update(User).where(User.id == current_user.id).values(**data))
+        await db.commit()
+    return {"message": "Dialer settings saved"}
 
 
 # ── DYNAMIC /{param} ROUTES LAST ───────────────────────────────────────────

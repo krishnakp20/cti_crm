@@ -6,12 +6,24 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from app.core.database import get_db
 from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, RolePermission, Permission
 from app.models.session import UserSession
 from app.middleware.auth import get_current_user
 from app.core.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+async def get_user_permissions(user: User, db: AsyncSession) -> list[str]:
+    """Return list of granted permission slugs for a user via their custom role."""
+    if not user.role_id:
+        return []
+    result = await db.execute(
+        select(Permission.slug)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
+        .where(RolePermission.role_id == user.role_id, RolePermission.granted == True)
+    )
+    return [row[0] for row in result.fetchall()]
 
 
 class LoginRequest(BaseModel):
@@ -63,6 +75,8 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     await db.execute(update(User).where(User.id == user.id).values(last_login=datetime.now(timezone.utc)))
     await db.commit()
 
+    permissions = await get_user_permissions(user, db)
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -74,6 +88,8 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
             "role": user.role,
             "client_id": user.client_id,
             "avatar_url": user.avatar_url,
+            "role_id": user.role_id,
+            "permissions": permissions,
         }
     }
 
@@ -164,7 +180,8 @@ async def change_password(
 
 
 @router.get("/me")
-async def me(current_user: User = Depends(get_current_user)):
+async def me(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    permissions = await get_user_permissions(current_user, db)
     return {
         "id": current_user.id,
         "email": current_user.email,
@@ -173,4 +190,12 @@ async def me(current_user: User = Depends(get_current_user)):
         "client_id": current_user.client_id,
         "avatar_url": current_user.avatar_url,
         "is_active": current_user.is_active,
+        "role_id": current_user.role_id,
+        "permissions": permissions,
+        "extension": current_user.extension,
+        "dialer_user": current_user.dialer_user,
+        "connection_type": current_user.connection_type or "remote",
+        "agent_mobile": current_user.agent_mobile,
+        "sip_server_url": current_user.sip_server_url,
+        "sip_password": current_user.sip_password,
     }

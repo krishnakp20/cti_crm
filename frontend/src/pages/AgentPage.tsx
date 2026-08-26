@@ -4,35 +4,53 @@ import { useNavigate } from 'react-router-dom'
 import { callsApi, ticketsApi } from '../services/api'
 import { useSelector } from 'react-redux'
 import { RootState } from '../redux/store'
-import { Phone, Ticket, Calendar, PhoneCall, X, Settings, Wifi, WifiOff, FileText, Save, ExternalLink } from 'lucide-react'
+import {
+  Phone, Ticket, Calendar, PhoneCall, X, Settings,
+  Wifi, WifiOff, FileText, Save, ExternalLink, AlertCircle, CheckCircle2,
+  Headphones, Radio,
+} from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '../utils/cn'
 import api from '../services/api'
+import toast from 'react-hot-toast'
+import JsSIP from 'jssip'
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
+const CALL_TAGS = ['Query', 'Complaint', 'Follow-up', 'Sales', 'Support', 'Other']
+
+const DISPOSITIONS = [
+  { value: '', label: '— Select Disposition —' },
+  { value: 'resolved',            label: 'Resolved' },
+  { value: 'pending',             label: 'Pending' },
+  { value: 'escalated',           label: 'Escalated' },
+  { value: 'not_reachable',       label: 'Not Reachable' },
+  { value: 'call_back_requested', label: 'Call Back Requested' },
+]
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface IncomingCall {
   uniqueid: string
   caller_id: string
   caller_name: string
   campaign_id?: number
-  customer?: { name?: string; email?: string; city?: string; remarks?: string }
+  customer?: { name?: string; email?: string; city?: string }
   form?: {
     id: number
     name: string
     fields: Array<{
-      id: number
-      label: string
-      field_name: string
-      field_type: string
-      placeholder?: string
-      options?: Array<{ label: string; value: string }>
-      is_required: boolean
-      order: number
+      id: number; label: string; field_name: string; field_type: string
+      placeholder?: string; options?: Array<{ label: string; value: string }>
+      is_required: boolean; order: number
     }>
   }
 }
 
-// ── WebSocket hook ────────────────────────────────────────────────────────────
+interface WrapupData {
+  call: IncomingCall
+  formValues: Record<string, any>
+}
+
+// ── WebSocket hook ─────────────────────────────────────────────────────────────
 function useAgentWebSocket(token: string | null, onCallArrive: (call: IncomingCall) => void) {
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
@@ -46,7 +64,6 @@ function useAgentWebSocket(token: string | null, onCallArrive: (call: IncomingCa
 
     ws.onopen = () => {
       setConnected(true)
-      // heartbeat
       const ping = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
       }, 25000)
@@ -56,7 +73,6 @@ function useAgentWebSocket(token: string | null, onCallArrive: (call: IncomingCa
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data)
-        console.log('[WS MESSAGE]', msg)
         if (msg.type === 'call_arrive') onCallArrive(msg as IncomingCall)
       } catch { /* ignore */ }
     }
@@ -80,13 +96,127 @@ function useAgentWebSocket(token: string | null, onCallArrive: (call: IncomingCa
   return connected
 }
 
-// ── Form field renderer ───────────────────────────────────────────────────────
+// ── WebRTC Softphone hook ─────────────────────────────────────────────────────
+type SipStatus = 'idle' | 'connecting' | 'registered' | 'ringing' | 'in_call' | 'failed'
+
+interface SipConfig {
+  server: string    // wss://192.168.10.30:8089/ws
+  extension: string // e.g. "8001"
+  password: string
+  domain: string    // e.g. "192.168.10.30"
+}
+
+function useWebRTCSoftphone(config: SipConfig | null) {
+  const [status, setStatus] = useState<SipStatus>('idle')
+  const [callSession, setCallSession] = useState<any>(null)
+  const uaRef = useRef<any>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => {
+    if (!config) return
+    if (!config.server || !config.extension || !config.password) return
+
+    // Expose JsSIP for browser console debugging
+    ;(window as any).JsSIP = JsSIP
+    JsSIP.debug.enable('JsSIP:*')
+
+    const socket = new JsSIP.WebSocketInterface(config.server)
+    const ua = new JsSIP.UA({
+      sockets: [socket],
+      uri: `sip:${config.extension}@${config.domain}`,
+      password: config.password,
+      register: true,
+      register_expires: 300,
+      contact_uri: `sip:${config.extension}@${config.domain};transport=ws`,
+    })
+    uaRef.current = ua
+
+    ua.on('connecting', () => setStatus('connecting'))
+    ua.on('connected', () => setStatus('connecting'))
+    ua.on('registered', () => setStatus('registered'))
+    ua.on('unregistered', () => setStatus('idle'))
+    ua.on('registrationFailed', () => setStatus('failed'))
+    ua.on('disconnected', () => setStatus('idle'))
+
+    ua.on('newRTCSession', (e: any) => {
+      const session = e.session
+      if (session.direction !== 'incoming') return
+
+      setStatus('ringing')
+      setCallSession(session)
+
+      session.on('accepted', () => setStatus('in_call'))
+      session.on('ended', () => { setStatus('registered'); setCallSession(null) })
+      session.on('failed', () => { setStatus('registered'); setCallSession(null) })
+
+      session.on('peerconnection', (pe: any) => {
+        const pc: RTCPeerConnection = pe.peerconnection
+        pc.ontrack = (ev) => {
+          if (!audioRef.current) {
+            audioRef.current = new Audio()
+            audioRef.current.autoplay = true
+          }
+          audioRef.current.srcObject = ev.streams[0]
+        }
+      })
+
+      // Auto-answer after brief delay (ViciDial expects auto-answer)
+      setTimeout(() => {
+        if (session.status !== session.C?.STATUS_TERMINATED) {
+          session.answer({
+            mediaConstraints: { audio: true, video: false },
+            pcConfig: { iceServers: [] },
+          })
+        }
+      }, 400)
+    })
+
+    ua.start()
+    return () => {
+      try { ua.stop() } catch { /* ignore */ }
+    }
+  }, [config?.server, config?.extension, config?.password, config?.domain])
+
+  const hangup = useCallback(() => {
+    if (callSession) {
+      try { callSession.terminate() } catch { /* ignore */ }
+    }
+  }, [callSession])
+
+  return { status, hangup }
+}
+
+// ── Softphone status badge ────────────────────────────────────────────────────
+function SoftphoneBadge({ status, onHangup }: { status: SipStatus; onHangup: () => void }) {
+  const map: Record<SipStatus, { label: string; cls: string }> = {
+    idle:        { label: 'WebRTC: Offline',     cls: 'bg-gray-100 text-gray-500' },
+    connecting:  { label: 'WebRTC: Connecting…', cls: 'bg-yellow-100 text-yellow-700' },
+    registered:  { label: 'WebRTC: Ready',       cls: 'bg-blue-100 text-blue-700' },
+    ringing:     { label: 'WebRTC: Ringing…',    cls: 'bg-purple-100 text-purple-700' },
+    in_call:     { label: 'WebRTC: In Call',     cls: 'bg-green-100 text-green-700' },
+    failed:      { label: 'WebRTC: Reg Failed',  cls: 'bg-red-100 text-red-700' },
+  }
+  const { label, cls } = map[status]
+  return (
+    <div className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium', cls)}>
+      <Headphones className="w-3 h-3" />
+      {label}
+      {status === 'in_call' && (
+        <button onClick={onHangup} className="ml-1 hover:text-red-600 transition-colors">
+          <X className="w-3 h-3" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── Dynamic form field renderer ───────────────────────────────────────────────
 type FormFieldDef = NonNullable<IncomingCall['form']>['fields'][0]
 function DynField({ field, value, onChange }: { field: FormFieldDef; value: any; onChange: (v: any) => void }) {
   const base = 'input w-full text-sm'
   switch (field.field_type) {
     case 'textarea':
-      return <textarea className="input w-full text-sm min-h-[60px]" placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
+      return <textarea className="input w-full text-sm min-h-[56px]" placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
     case 'dropdown':
       return (
         <select className={base} value={value || ''} onChange={e => onChange(e.target.value)}>
@@ -101,7 +231,7 @@ function DynField({ field, value, onChange }: { field: FormFieldDef; value: any;
             <label key={o.value} className="flex items-center gap-1 text-sm cursor-pointer">
               <input type="checkbox" checked={(value || []).includes(o.value)} onChange={e => {
                 const arr: string[] = value || []
-                onChange(e.target.checked ? [...arr, o.value] : arr.filter(v => v !== o.value))
+                onChange(e.target.checked ? [...arr, o.value] : arr.filter((v: string) => v !== o.value))
               }} />
               {o.label}
             </label>
@@ -119,17 +249,45 @@ function DynField({ field, value, onChange }: { field: FormFieldDef; value: any;
           ))}
         </div>
       )
-    case 'date':
-      return <input type="date" className={base} value={value || ''} onChange={e => onChange(e.target.value)} />
-    case 'number':
-      return <input type="number" className={base} placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
-    case 'email':
-      return <input type="email" className={base} placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
-    case 'mobile':
-      return <input type="tel" className={base} placeholder={field.placeholder || '+91 9999999999'} value={value || ''} onChange={e => onChange(e.target.value)} />
-    default:
-      return <input type="text" className={base} placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
+    case 'date':   return <input type="date" className={base} value={value || ''} onChange={e => onChange(e.target.value)} />
+    case 'number': return <input type="number" className={base} placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
+    case 'email':  return <input type="email" className={base} placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
+    case 'mobile': return <input type="tel" className={base} placeholder={field.placeholder || '+91 9999999999'} value={value || ''} onChange={e => onChange(e.target.value)} />
+    default:       return <input type="text" className={base} placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
   }
+}
+
+// ── Call Tags picker ──────────────────────────────────────────────────────────
+function CallTagsPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const toggle = (tag: string) =>
+    onChange(value.includes(tag) ? value.filter(t => t !== tag) : [...value, tag])
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {CALL_TAGS.map(tag => (
+        <button
+          key={tag} type="button"
+          onClick={() => toggle(tag)}
+          className={cn(
+            'px-2.5 py-1 rounded-full text-xs font-medium border transition-all',
+            value.includes(tag)
+              ? 'bg-primary-600 text-white border-primary-600'
+              : 'bg-white dark:bg-gray-800 text-gray-500 border-gray-200 dark:border-gray-700 hover:border-primary-400 hover:text-primary-600'
+          )}
+        >
+          {tag}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Section label ─────────────────────────────────────────────────────────────
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-2xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2 mt-1">
+      {children}
+    </p>
+  )
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -142,21 +300,42 @@ export default function AgentPage() {
   const [activeCall, setActiveCall] = useState<IncomingCall | null>(null)
   const [callTimer, setCallTimer] = useState(0)
   const [formValues, setFormValues] = useState<Record<string, any>>({})
+  const [callTags, setCallTags] = useState<string[]>([])
+  const [disposition, setDisposition] = useState('')
+  const [callSummary, setCallSummary] = useState('')
+
+  // Wrap-up gate — shown after call ends if disposition not yet set
+  const [wrapup, setWrapup] = useState<WrapupData | null>(null)
+  const [wrapupDisposition, setWrapupDisposition] = useState('')
+  const [wrapupSummary, setWrapupSummary] = useState('')
+  const [wrapupTags, setWrapupTags] = useState<string[]>([])
+  const [dispRequired, setDispRequired] = useState(false)
+
   const [showExtModal, setShowExtModal] = useState(false)
   const [extension, setExtension] = useState('')
+  const [sipPassword, setSipPassword] = useState('')
+  const [sipServerUrl, setSipServerUrl] = useState('')
+  const [connectionType, setConnectionType] = useState<'remote' | 'webrtc'>('remote')
+  const [agentMobile, setAgentMobile] = useState('')
   const [dialerUser, setDialerUser] = useState('')
   const [saving, setSaving] = useState(false)
-  const [submitMsg, setSubmitMsg] = useState('')
 
-  // Load current extension + dialer user
   useEffect(() => {
     api.get('/calls/dialer/agent-status').then(r => {
       setExtension(r.data.extension || '')
       setDialerUser(r.data.dialer_user || '')
     }).catch(() => {})
+    // Load SIP / connection settings from auth profile
+    api.get('/auth/me').then(r => {
+      setConnectionType(r.data.connection_type || 'remote')
+      setAgentMobile(r.data.agent_mobile || '')
+      setSipServerUrl(r.data.sip_server_url || '')
+      setSipPassword(r.data.sip_password || '')
+      if (r.data.extension) setExtension(r.data.extension)
+      if (r.data.dialer_user) setDialerUser(r.data.dialer_user)
+    }).catch(() => {})
   }, [])
 
-  // Call timer
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>
     if (activeCall) {
@@ -167,160 +346,287 @@ export default function AgentPage() {
     return () => clearInterval(timer)
   }, [activeCall])
 
-  // WebSocket — auto-pop form on incoming call
   const handleCallArrive = useCallback(async (call: IncomingCall) => {
-    console.log('[CALL ARRIVE]', call)
+    // Don't interrupt wrap-up — queue the call notification but don't pop form
     const prefill: Record<string, any> = {
       customer_name: call.caller_name || call.customer?.name || '',
       customer_mobile: call.caller_id,
       customer_email: call.customer?.email || '',
-      city: call.customer?.city || '',
+      customer_address: '',
     }
 
     let resolvedCall = { ...call }
 
-    // If form not in WS payload, fetch the agent's active form from API
     if (!call.form) {
       try {
-        const formsRes = await api.get('/forms/')
+        const formsRes = await api.get('/forms')
         const forms: any[] = Array.isArray(formsRes.data) ? formsRes.data : (formsRes.data?.items || [])
-        const ticketForm = forms.find((f: any) => f.category === 'ticket' && f.is_active)
+        const ticketForm = forms.find((f: any) => f.is_active)
         if (ticketForm) {
           const fieldsRes = await api.get(`/forms/${ticketForm.id}/fields`)
-          resolvedCall.form = {
-            id: ticketForm.id,
-            name: ticketForm.name,
-            fields: fieldsRes.data,
-          }
+          resolvedCall.form = { id: ticketForm.id, name: ticketForm.name, fields: fieldsRes.data }
         }
-      } catch (e) {
-        // form load failed — show basic quick-capture panel
-      }
+      } catch { /* fallback to basic */ }
     }
 
-    // Pre-fill matching form fields
     if (resolvedCall.form) {
       resolvedCall.form.fields.forEach((f: any) => {
-        if (f.field_name === 'mobile' || f.field_name === 'phone' || f.field_name === 'customer_mobile') {
-          prefill[f.field_name] = call.caller_id
-        }
-        if (f.field_name === 'name' || f.field_name === 'customer_name') {
-          prefill[f.field_name] = call.caller_name || call.customer?.name || ''
-        }
-        if (f.field_name === 'email' || f.field_name === 'customer_email') {
-          prefill[f.field_name] = call.customer?.email || ''
-        }
-        if (f.field_name === 'city') {
-          prefill[f.field_name] = call.customer?.city || ''
-        }
+        if (['mobile', 'phone', 'customer_mobile'].includes(f.field_name)) prefill[f.field_name] = call.caller_id
+        if (['name', 'customer_name'].includes(f.field_name)) prefill[f.field_name] = call.caller_name || call.customer?.name || ''
+        if (['email', 'customer_email'].includes(f.field_name)) prefill[f.field_name] = call.customer?.email || ''
       })
     }
 
     setFormValues(prefill)
+    setCallTags([])
+    setDisposition('')
+    setCallSummary('')
     setActiveCall(resolvedCall)
   }, [])
 
   const wsConnected = useAgentWebSocket(token, handleCallArrive)
 
+  // Build SIP config from current state; null disables the hook
+  const sipConfig: SipConfig | null = (connectionType === 'webrtc' && extension && sipPassword && sipServerUrl)
+    ? {
+        server: sipServerUrl,
+        extension,
+        password: sipPassword,
+        domain: (() => { try { return new URL(sipServerUrl).hostname } catch { return sipServerUrl } })(),
+      }
+    : null
+
+  const { status: sipStatus, hangup: sipHangup } = useWebRTCSoftphone(sipConfig)
+
   const { data: tickets } = useQuery({
     queryKey: ['agent-tickets'],
     queryFn: () => ticketsApi.list({ assigned_to: user?.id, limit: 20 }).then(r => r.data),
   })
-
   const { data: callbacks } = useQuery({
     queryKey: ['callbacks'],
     queryFn: () => callsApi.listCallbacks().then(r => r.data),
   })
-
   const { data: callLogs } = useQuery({
     queryKey: ['agent-calls'],
     queryFn: () => callsApi.listLogs({ limit: 10 }).then(r => r.data),
   })
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-  const openTickets = (tickets?.items || []).filter((t: any) => t.status === 'open' || t.status === 'in_progress').length
-  const todayCallbacks = (callbacks || []).filter((c: any) => {
-    const d = new Date(c.scheduled_at)
-    return d.toDateString() === new Date().toDateString()
-  }).length
+  const openTickets = (tickets?.items || []).filter((t: any) => ['open', 'in_progress'].includes(t.status)).length
+  const todayCallbacks = (callbacks || []).filter((c: any) =>
+    new Date(c.scheduled_at).toDateString() === new Date().toDateString()
+  ).length
 
   const saveExtension = async () => {
     setSaving(true)
     await Promise.all([
       api.patch('/calls/dialer/set-extension', { extension }).catch(() => {}),
       api.patch('/calls/dialer/set-dialer-user', { dialer_user: dialerUser }).catch(() => {}),
+      api.patch('/users/me/dialer-settings', {
+        connection_type: connectionType,
+        agent_mobile: agentMobile || null,
+        sip_server_url: sipServerUrl || null,
+        sip_password: sipPassword || null,
+      }).catch(() => {}),
     ])
     setSaving(false)
     setShowExtModal(false)
+    toast.success('Settings saved')
   }
 
-  const submitCallForm = async () => {
+  // Build ticket payload from current call + disposition fields
+  const buildPayload = (call: IncomingCall, fv: Record<string, any>, disp: string, summary: string, tags: string[]) => ({
+    subject: fv.subject || `Inbound Call — ${call.caller_id}`,
+    customer_name: fv.customer_name || call.caller_name || '',
+    customer_mobile: fv.customer_mobile || call.caller_id,
+    customer_email: fv.customer_email || '',
+    priority: fv.priority || 'medium',
+    form_id: call.form?.id,
+    form_data: {
+      ...fv,
+      call_tags: tags,
+      disposition: disp,
+      call_summary: summary,
+    },
+    dialer_call_id: call.uniqueid,
+  })
+
+  // Save during active call (disposition optional here — warn but allow)
+  const saveAndCreate = async () => {
     if (!activeCall) return
+    if (!disposition) {
+      setDispRequired(true)
+      // Scroll to disposition
+      document.getElementById('disposition-field')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      toast.error('Please select a Call Disposition before saving')
+      return
+    }
+    setDispRequired(false)
     setSaving(true)
-    setSubmitMsg('')
     try {
-      const payload = {
-        subject: formValues.subject || `Inbound Call — ${activeCall.caller_id}`,
-        customer_name: formValues.customer_name || activeCall.caller_name || '',
-        customer_mobile: formValues.customer_mobile || activeCall.caller_id,
-        customer_email: formValues.customer_email || '',
-        priority: formValues.priority || 'medium',
-        form_id: activeCall.form?.id,
-        form_data: formValues,
-        dialer_call_id: activeCall.uniqueid,
-      }
-      await ticketsApi.create(payload)
+      await ticketsApi.create(buildPayload(activeCall, formValues, disposition, callSummary, callTags))
       queryClient.invalidateQueries({ queryKey: ['agent-tickets'] })
-      setSubmitMsg('Ticket created!')
-      setTimeout(() => { setActiveCall(null); setSubmitMsg('') }, 1500)
+      toast.success('Ticket created!')
+      setActiveCall(null)
     } catch (e: any) {
-      setSubmitMsg('Error: ' + (e?.response?.data?.detail || 'Failed'))
+      toast.error(e?.response?.data?.detail || 'Failed to create ticket')
+    }
+    setSaving(false)
+  }
+
+  // End call → if no disposition, enter wrap-up gate
+  const endCall = () => {
+    if (!activeCall) return
+    if (disposition) {
+      // Disposition filled — save and clear
+      saveAndCreate()
+    } else {
+      // Enter mandatory wrap-up
+      setWrapup({ call: activeCall, formValues: { ...formValues } })
+      setWrapupDisposition('')
+      setWrapupSummary(callSummary)
+      setWrapupTags([...callTags])
+      setActiveCall(null)
+    }
+  }
+
+  // Submit wrap-up
+  const submitWrapup = async () => {
+    if (!wrapup) return
+    if (!wrapupDisposition) {
+      setDispRequired(true)
+      return
+    }
+    setDispRequired(false)
+    setSaving(true)
+    try {
+      await ticketsApi.create(buildPayload(wrapup.call, wrapup.formValues, wrapupDisposition, wrapupSummary, wrapupTags))
+      queryClient.invalidateQueries({ queryKey: ['agent-tickets'] })
+      toast.success('Ticket saved — you are now available')
+      setWrapup(null)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || 'Failed to save')
     }
     setSaving(false)
   }
 
   return (
     <div className="space-y-4 max-w-5xl">
-      {/* Header */}
+
+      {/* ── MANDATORY WRAP-UP GATE ─────────────────────────────────────────── */}
+      {wrapup && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg">
+            {/* Header */}
+            <div className="flex items-center gap-3 px-6 py-4 bg-amber-50 dark:bg-amber-900/20 rounded-t-2xl border-b border-amber-200 dark:border-amber-800">
+              <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-bold text-gray-900 dark:text-white">Complete call wrap-up to continue</p>
+                <p className="text-xs text-gray-500">You cannot receive the next call until disposition is submitted.</p>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Caller summary */}
+              <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                <div className="w-9 h-9 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center flex-shrink-0">
+                  <Phone className="w-4 h-4 text-primary-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{wrapup.call.caller_name || 'Unknown'}</p>
+                  <p className="text-xs text-gray-500">{wrapup.call.caller_id}</p>
+                </div>
+              </div>
+
+              {/* Call Tags */}
+              <div>
+                <SectionLabel>Call Tags</SectionLabel>
+                <CallTagsPicker value={wrapupTags} onChange={setWrapupTags} />
+              </div>
+
+              {/* Disposition — required */}
+              <div>
+                <SectionLabel>Call Disposition <span className="text-red-500 normal-case">*</span></SectionLabel>
+                <select
+                  value={wrapupDisposition}
+                  onChange={e => { setWrapupDisposition(e.target.value); setDispRequired(false) }}
+                  className={cn('input w-full text-sm', dispRequired && !wrapupDisposition ? 'border-red-500 ring-2 ring-red-200' : '')}
+                >
+                  {DISPOSITIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                </select>
+                {dispRequired && !wrapupDisposition && (
+                  <p className="text-xs text-red-500 mt-1">Disposition is required before you can continue.</p>
+                )}
+              </div>
+
+              {/* Call Summary — optional */}
+              <div>
+                <SectionLabel>Call Summary <span className="text-gray-400 normal-case font-normal">(optional)</span></SectionLabel>
+                <textarea
+                  className="input w-full text-sm min-h-[72px] resize-none"
+                  placeholder="Brief summary of the call..."
+                  value={wrapupSummary}
+                  onChange={e => setWrapupSummary(e.target.value)}
+                />
+              </div>
+
+              <button
+                onClick={submitWrapup}
+                disabled={saving}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition-all disabled:opacity-60"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {saving ? 'Submitting…' : 'Submit & Mark Available'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Header ────────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-gray-900 dark:text-white">Agent Panel</h1>
           <p className="text-xs text-gray-500">Welcome back, {user?.full_name}</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Extension badge */}
           <button
             onClick={() => setShowExtModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300"
-            title="Set your ViciBox extension"
           >
             <Settings className="w-3 h-3" />
             Ext: {extension || 'Not set'}
           </button>
-          {/* WS status */}
-          <div className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium', wsConnected ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700')}>
+          <div className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium',
+            wsConnected ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700')}>
             {wsConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
             {wsConnected ? 'Live' : 'Connecting…'}
           </div>
-          {/* Call status */}
-          <div className={cn('flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium', activeCall ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700')}>
-            <div className={cn('w-2 h-2 rounded-full', activeCall ? 'bg-red-500 animate-pulse' : 'bg-green-500')} />
-            {activeCall ? `On Call — ${formatTime(callTimer)}` : 'Available'}
+          {connectionType === 'webrtc' && (
+            <SoftphoneBadge status={sipStatus} onHangup={sipHangup} />
+          )}
+          <div className={cn('flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium',
+            activeCall ? 'bg-red-100 text-red-700'
+            : wrapup ? 'bg-amber-100 text-amber-700'
+            : 'bg-green-100 text-green-700')}>
+            <div className={cn('w-2 h-2 rounded-full',
+              activeCall ? 'bg-red-500 animate-pulse'
+              : wrapup ? 'bg-amber-500 animate-pulse'
+              : 'bg-green-500')} />
+            {activeCall ? `On Call — ${formatTime(callTimer)}` : wrapup ? 'Wrap-up Required' : 'Available'}
           </div>
         </div>
       </div>
 
-      {/* Stats */}
+      {/* ── Stats ─────────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {[
-          { label: 'Open Tickets', value: openTickets, icon: Ticket, color: 'text-primary-600 bg-primary-50' },
-          { label: 'Today Callbacks', value: todayCallbacks, icon: Calendar, color: 'text-orange-600 bg-orange-50' },
-          { label: 'Calls Today', value: callLogs?.total || 0, icon: Phone, color: 'text-blue-600 bg-blue-50' },
+          { label: 'Open Tickets',    value: openTickets,          icon: Ticket,   color: 'text-primary-600 bg-primary-50' },
+          { label: 'Today Callbacks', value: todayCallbacks,       icon: Calendar, color: 'text-orange-600 bg-orange-50' },
+          { label: 'Calls Today',     value: callLogs?.total || 0, icon: Phone,    color: 'text-blue-600 bg-blue-50' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="card p-3 flex items-center gap-3">
-            <div className={cn('p-2 rounded-lg', color)}>
-              <Icon className="w-4 h-4" />
-            </div>
+            <div className={cn('p-2 rounded-lg', color)}><Icon className="w-4 h-4" /></div>
             <div>
               <p className="text-xl font-bold text-gray-900 dark:text-white">{value}</p>
               <p className="text-2xs text-gray-500">{label}</p>
@@ -329,9 +635,10 @@ export default function AgentPage() {
         ))}
       </div>
 
-      {/* ── INCOMING CALL POPUP ─────────────────────────────────────────────── */}
+      {/* ── ACTIVE CALL FORM ──────────────────────────────────────────────────── */}
       {activeCall && (
-        <div className="card border-2 border-red-300 dark:border-red-700 shadow-lg">
+        <div className="card border-2 border-red-200 dark:border-red-800 shadow-lg">
+
           {/* Call bar */}
           <div className="flex items-center justify-between px-4 py-3 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800">
             <div className="flex items-center gap-3">
@@ -339,105 +646,113 @@ export default function AgentPage() {
                 <PhoneCall className="w-4 h-4 text-red-600 animate-pulse" />
               </div>
               <div>
-                <p className="text-sm font-bold text-gray-900 dark:text-white">
-                  {activeCall.caller_name || 'Unknown Caller'}
-                </p>
+                <p className="text-sm font-bold text-gray-900 dark:text-white">{activeCall.caller_name || 'Unknown Caller'}</p>
                 <p className="text-xs text-gray-500">{activeCall.caller_id}</p>
               </div>
               <div className="text-lg font-mono font-bold text-red-600 ml-4">{formatTime(callTimer)}</div>
             </div>
             <div className="flex items-center gap-2">
-              <button className="btn-sm bg-green-600 text-white hover:bg-green-700 flex items-center gap-1" onClick={submitCallForm} disabled={saving}>
+              <button
+                onClick={saveAndCreate} disabled={saving}
+                className="btn-sm bg-green-600 text-white hover:bg-green-700 flex items-center gap-1"
+              >
                 <Save className="w-3.5 h-3.5" />
-                {saving ? 'Saving…' : 'Save & Create Ticket'}
+                {saving ? 'Saving…' : 'Save Ticket'}
               </button>
-              <button className="btn-danger btn-sm flex items-center gap-1" onClick={() => setActiveCall(null)}>
+              <button
+                onClick={endCall}
+                className="btn-sm bg-red-600 text-white hover:bg-red-700 flex items-center gap-1"
+              >
                 <X className="w-3.5 h-3.5" /> End Call
               </button>
             </div>
           </div>
 
-          {submitMsg && (
-            <div className={cn('px-4 py-2 text-sm font-medium', submitMsg.startsWith('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700')}>
-              {submitMsg}
-            </div>
-          )}
+          {/* Form body */}
+          <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-3">
 
-          {/* Form fields */}
-          <div className="p-4">
-            {activeCall.form ? (
-              <>
-                <div className="flex items-center gap-2 mb-3">
-                  <FileText className="w-4 h-4 text-primary-600" />
-                  <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{activeCall.form.name}</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {/* Always-visible base fields */}
-                  <div>
-                    <label className="label">Customer Name</label>
-                    <input className="input w-full text-sm" value={formValues.customer_name || ''} onChange={e => setFormValues(v => ({ ...v, customer_name: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="label">Mobile <span className="text-red-500">*</span></label>
-                    <input className="input w-full text-sm" value={formValues.customer_mobile || ''} onChange={e => setFormValues(v => ({ ...v, customer_mobile: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="label">Email</label>
-                    <input type="email" className="input w-full text-sm" value={formValues.customer_email || ''} onChange={e => setFormValues(v => ({ ...v, customer_email: e.target.value }))} />
-                  </div>
-                  {/* Dynamic form fields */}
-                  {activeCall.form.fields
-                    .filter(f => !['customer_name', 'name', 'mobile', 'phone', 'email', 'customer_email', 'customer_mobile'].includes(f.field_name))
-                    .map(f => (
-                      <div key={f.id} className={f.field_type === 'textarea' ? 'md:col-span-2' : ''}>
-                        <label className="label">
-                          {f.label}
-                          {f.is_required && <span className="text-red-500 ml-1">*</span>}
-                        </label>
-                        <DynField
-                          field={f}
-                          value={formValues[f.field_name]}
-                          onChange={v => setFormValues(prev => ({ ...prev, [f.field_name]: v }))}
-                        />
-                      </div>
-                    ))}
-                </div>
-              </>
-            ) : (
-              /* No form assigned — show basic quick-capture */
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* ─ Customer ─ */}
+            <div className="lg:col-span-2">
+              <SectionLabel>Customer Details</SectionLabel>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Customer Name</label>
-                  <input className="input w-full text-sm" value={formValues.customer_name || ''} onChange={e => setFormValues(v => ({ ...v, customer_name: e.target.value }))} />
+                  <label className="label">Name</label>
+                  <input className="input w-full text-sm" value={formValues.customer_name || ''} onChange={e => setFormValues(v => ({ ...v, customer_name: e.target.value }))} placeholder="Customer name" />
                 </div>
                 <div>
-                  <label className="label">Mobile</label>
-                  <input className="input w-full text-sm" value={formValues.customer_mobile || activeCall.caller_id} onChange={e => setFormValues(v => ({ ...v, customer_mobile: e.target.value }))} />
+                  <label className="label">Mobile <span className="text-red-500">*</span></label>
+                  <input className="input w-full text-sm" value={formValues.customer_mobile || ''} onChange={e => setFormValues(v => ({ ...v, customer_mobile: e.target.value }))} />
                 </div>
                 <div>
                   <label className="label">Email</label>
-                  <input type="email" className="input w-full text-sm" value={formValues.customer_email || ''} onChange={e => setFormValues(v => ({ ...v, customer_email: e.target.value }))} />
+                  <input type="email" className="input w-full text-sm" value={formValues.customer_email || ''} onChange={e => setFormValues(v => ({ ...v, customer_email: e.target.value }))} placeholder="email@example.com" />
                 </div>
                 <div>
-                  <label className="label">Priority</label>
-                  <select className="input w-full text-sm" value={formValues.priority || 'medium'} onChange={e => setFormValues(v => ({ ...v, priority: e.target.value }))}>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
-                  </select>
+                  <label className="label">Address</label>
+                  <input className="input w-full text-sm" value={formValues.customer_address || ''} onChange={e => setFormValues(v => ({ ...v, customer_address: e.target.value }))} placeholder="City / Area" />
                 </div>
-                <div className="md:col-span-2">
-                  <label className="label">Notes / Subject</label>
-                  <textarea className="input w-full text-sm min-h-[60px]" value={formValues.subject || ''} onChange={e => setFormValues(v => ({ ...v, subject: e.target.value }))} placeholder="Brief description of the call..." />
+              </div>
+            </div>
+
+            {/* ─ Dynamic form fields ─ */}
+            {activeCall.form && activeCall.form.fields.filter(f =>
+              !['customer_name','name','mobile','phone','email','customer_email','customer_mobile'].includes(f.field_name)
+            ).length > 0 && (
+              <div className="lg:col-span-2">
+                <SectionLabel>
+                  <span className="flex items-center gap-1.5">
+                    <FileText className="w-3 h-3" />{activeCall.form.name}
+                  </span>
+                </SectionLabel>
+                <div className="grid grid-cols-2 gap-3">
+                  {activeCall.form.fields
+                    .filter(f => !['customer_name','name','mobile','phone','email','customer_email','customer_mobile'].includes(f.field_name))
+                    .map(f => (
+                      <div key={f.id} className={f.field_type === 'textarea' ? 'col-span-2' : ''}>
+                        <label className="label">{f.label}{f.is_required && <span className="text-red-500 ml-1">*</span>}</label>
+                        <DynField field={f} value={formValues[f.field_name]} onChange={v => setFormValues(p => ({ ...p, [f.field_name]: v }))} />
+                      </div>
+                    ))}
                 </div>
               </div>
             )}
+
+            {/* ─ Call Tags ─ */}
+            <div className="lg:col-span-2">
+              <SectionLabel>Call Tags</SectionLabel>
+              <CallTagsPicker value={callTags} onChange={setCallTags} />
+            </div>
+
+            {/* ─ Disposition ─ */}
+            <div id="disposition-field">
+              <SectionLabel>Call Disposition <span className="text-red-500 normal-case">*</span></SectionLabel>
+              <select
+                value={disposition}
+                onChange={e => { setDisposition(e.target.value); setDispRequired(false) }}
+                className={cn('input w-full text-sm', dispRequired && !disposition ? 'border-red-500 ring-2 ring-red-200' : '')}
+              >
+                {DISPOSITIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+              {dispRequired && !disposition && (
+                <p className="text-xs text-red-500 mt-1">Required — select a disposition to save.</p>
+              )}
+            </div>
+
+            {/* ─ Call Summary ─ */}
+            <div>
+              <SectionLabel>Call Summary <span className="text-gray-400 normal-case font-normal">(optional)</span></SectionLabel>
+              <textarea
+                className="input w-full text-sm min-h-[72px] resize-none"
+                placeholder="Brief summary of what was discussed..."
+                value={callSummary}
+                onChange={e => setCallSummary(e.target.value)}
+              />
+            </div>
           </div>
         </div>
       )}
 
-      {/* Tickets + Callbacks */}
+      {/* ── Tickets + Callbacks ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
           <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
@@ -449,11 +764,7 @@ export default function AgentPage() {
               <p className="text-xs text-gray-400 text-center py-8">No tickets assigned</p>
             ) : (
               (tickets?.items || []).slice(0, 10).map((t: any) => (
-                <div
-                  key={t.id}
-                  className="px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer group"
-                  onClick={() => navigate(`/tickets/${t.id}`)}
-                >
+                <div key={t.id} className="px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer group" onClick={() => navigate(`/tickets/${t.id}`)}>
                   <div className="flex items-center justify-between">
                     <span className="text-2xs font-mono text-primary-600">{t.ticket_number}</span>
                     <div className="flex items-center gap-1.5">
@@ -502,75 +813,54 @@ export default function AgentPage() {
         </div>
       </div>
 
-      {/* Dev simulator */}
-      <div className="card p-4">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Simulate Incoming Call <span className="text-2xs text-gray-400 font-normal">(dev / test)</span></h3>
-        <p className="text-2xs text-gray-400 mb-3">In production, ViciBox AGI triggers this automatically when a call lands on your extension.</p>
-        <div className="flex items-center gap-3 flex-wrap">
-          <input className="input w-44 text-sm" placeholder="+91 9999999999" id="sim-phone" />
-          <input className="input w-40 text-sm" placeholder="Caller name" id="sim-name" />
-          <button
-            className="btn-primary flex items-center gap-1.5"
-            onClick={async () => {
-              const phone = (document.getElementById('sim-phone') as HTMLInputElement)?.value
-              const name = (document.getElementById('sim-name') as HTMLInputElement)?.value
-              if (!phone) return
-              if (extension) {
-                // Hit the real webhook — backend will fetch form and push via WS
-                try {
-                  await api.post('/calls/dialer/call-arrived', {
-                    agent_extension: extension,
-                    caller_id: phone,
-                    caller_name: name || 'Customer',
-                    uniqueid: 'sim-' + Date.now(),
-                  })
-                  // WS event will arrive in ~100ms and trigger handleCallArrive
-                } catch {
-                  // Fallback if webhook fails — direct trigger with form fetch
-                  handleCallArrive({ uniqueid: 'sim-' + Date.now(), caller_id: phone, caller_name: name || 'Customer', customer: {} })
-                }
-              } else {
-                // No extension set — direct trigger with form fetch
-                handleCallArrive({ uniqueid: 'sim-' + Date.now(), caller_id: phone, caller_name: name || 'Customer', customer: {} })
-              }
-            }}
-          >
-            <PhoneCall className="w-4 h-4" /> Simulate Call
-          </button>
-        </div>
-        {!extension && (
-          <p className="text-2xs text-orange-500 mt-2">Set your ViciBox extension (top right) to simulate a full call with form auto-load.</p>
-        )}
-      </div>
 
-      {/* Extension modal */}
+      {/* ── Extension modal ────────────────────────────────────────────────────── */}
       {showExtModal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl p-6 w-80">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl p-6 w-96 max-h-[90vh] overflow-y-auto">
             <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-1">Dialer Settings</h3>
-            <p className="text-xs text-gray-500 mb-4">Connect your ViciDial account so incoming calls auto-pop the form.</p>
+            <p className="text-xs text-gray-500 mb-4">Configure your connection to ViciDial.</p>
+
+            {/* Connection type indicator */}
+            <div className={cn('flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium mb-4',
+              connectionType === 'webrtc' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-600 border border-gray-200')}>
+              {connectionType === 'webrtc' ? <Headphones className="w-3.5 h-3.5" /> : <Radio className="w-3.5 h-3.5" />}
+              {connectionType === 'webrtc' ? 'WebRTC mode — calls handled in this browser' : 'Remote mode — calls forwarded to your phone'}
+            </div>
+
             <label className="label">SIP Extension (ViciBox)</label>
-            <input
-              className="input w-full text-sm mb-3"
-              placeholder="e.g. 8001"
-              value={extension}
-              onChange={e => setExtension(e.target.value)}
-              autoFocus
-            />
+            <input className="input w-full text-sm mb-3" placeholder="e.g. 8001" value={extension} onChange={e => setExtension(e.target.value)} autoFocus />
+
             <label className="label">ViciDial Agent User ID</label>
-            <input
-              className="input w-full text-sm mb-4"
-              placeholder="e.g. 1001 or agent1"
-              value={dialerUser}
-              onChange={e => setDialerUser(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveExtension()}
-            />
-            <p className="text-2xs text-gray-400 mb-3">ViciDial Admin → Agents → Agent User column</p>
+            <input className="input w-full text-sm mb-1" placeholder="e.g. 7231" value={dialerUser} onChange={e => setDialerUser(e.target.value)} />
+            <p className="text-2xs text-gray-400 mb-4">ViciDial Admin → Agents → Agent User column</p>
+
+            {connectionType === 'remote' && (
+              <>
+                <label className="label">Agent Mobile (for call forwarding)</label>
+                <input className="input w-full text-sm mb-4" placeholder="+91 9999999999" value={agentMobile} onChange={e => setAgentMobile(e.target.value)} />
+              </>
+            )}
+
+            {connectionType === 'webrtc' && (
+              <>
+                <label className="label">SIP Server (WebSocket URL)</label>
+                <input className="input w-full text-sm mb-3" placeholder="wss://192.168.10.30:8089/ws" value={sipServerUrl} onChange={e => setSipServerUrl(e.target.value)} />
+                <label className="label">SIP Password</label>
+                <input type="password" className="input w-full text-sm mb-1" placeholder="Your SIP extension password" value={sipPassword} onChange={e => setSipPassword(e.target.value)} />
+                <p className="text-2xs text-gray-400 mb-4">Used to register your browser as a SIP phone with Asterisk.</p>
+                {sipStatus === 'failed' && (
+                  <p className="text-xs text-red-500 mb-3">Registration failed — check server URL, extension, and password.</p>
+                )}
+                {sipStatus === 'registered' && (
+                  <p className="text-xs text-green-600 mb-3">✓ Registered — browser is ready to receive calls.</p>
+                )}
+              </>
+            )}
+
             <div className="flex gap-2 justify-end">
               <button className="btn-secondary btn-sm" onClick={() => setShowExtModal(false)}>Cancel</button>
-              <button className="btn-primary btn-sm" onClick={saveExtension} disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
-              </button>
+              <button className="btn-primary btn-sm" onClick={saveExtension} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
         </div>

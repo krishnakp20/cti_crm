@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { clientsApi } from '../../services/api'
-import { Building2, CheckCircle, XCircle, Search } from 'lucide-react'
+import { useForm } from 'react-hook-form'
+import { Building2, CheckCircle, XCircle, Search, Plus, X, Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 import { cn } from '../../utils/cn'
@@ -17,11 +18,24 @@ export default function ClientsPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
+  const [showModal, setShowModal] = useState(false)
   const qc = useQueryClient()
+  const { register, handleSubmit, reset, formState: { errors } } = useForm()
 
   const { data, isLoading } = useQuery({
     queryKey: ['clients', page, status, search],
     queryFn: () => clientsApi.list({ page, limit: 20, status: status || undefined, search: search || undefined }).then(r => r.data),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (d: any) => clientsApi.create(d),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['clients'] })
+      toast.success('Client created successfully')
+      setShowModal(false)
+      reset()
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || 'Failed to create client'),
   })
 
   const activateMutation = useMutation({
@@ -43,6 +57,9 @@ export default function ClientsPage() {
           <h1 className="text-lg font-bold text-gray-900 dark:text-white">Clients</h1>
           <p className="text-xs text-gray-500">{data?.total || 0} registered companies</p>
         </div>
+        <button className="btn-primary" onClick={() => setShowModal(true)}>
+          <Plus className="w-3.5 h-3.5" /> Add Client
+        </button>
       </div>
 
       <div className="card">
@@ -97,20 +114,12 @@ export default function ClientsPage() {
                     <td className="td">
                       <div className="flex items-center gap-1">
                         {client.status !== 'active' && (
-                          <button
-                            className="btn-sm btn text-green-600 bg-green-50 hover:bg-green-100 border-0"
-                            onClick={() => activateMutation.mutate(client.id)}
-                            title="Activate"
-                          >
+                          <button className="btn-sm btn text-green-600 bg-green-50 hover:bg-green-100 border-0" onClick={() => activateMutation.mutate(client.id)}>
                             <CheckCircle className="w-3.5 h-3.5" /> Activate
                           </button>
                         )}
                         {client.status === 'active' && (
-                          <button
-                            className="btn-sm btn text-red-600 bg-red-50 hover:bg-red-100 border-0"
-                            onClick={() => deactivateMutation.mutate(client.id)}
-                            title="Deactivate"
-                          >
+                          <button className="btn-sm btn text-red-600 bg-red-50 hover:bg-red-100 border-0" onClick={() => deactivateMutation.mutate(client.id)}>
                             <XCircle className="w-3.5 h-3.5" /> Deactivate
                           </button>
                         )}
@@ -123,6 +132,60 @@ export default function ClientsPage() {
           </table>
         </div>
       </div>
+
+      {/* Add Client Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="card p-5 w-full max-w-md animate-fade-in">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Add New Client</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Creates the company and a client admin account</p>
+              </div>
+              <button className="btn-icon" onClick={() => { setShowModal(false); reset() }}><X className="w-4 h-4" /></button>
+            </div>
+
+            <form onSubmit={handleSubmit(d => createMutation.mutate(d))} className="space-y-3">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Company Details</p>
+              <div>
+                <label className="label">Company Name <span className="text-red-500">*</span></label>
+                <input {...register('company_name', { required: true })} className={cn('input', errors.company_name && 'border-red-400')} placeholder="Sheesha Green" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Company Email <span className="text-red-500">*</span></label>
+                  <input type="email" {...register('email', { required: true })} className="input" placeholder="info@company.com" />
+                </div>
+                <div>
+                  <label className="label">Max Agents</label>
+                  <input type="number" {...register('max_agents')} className="input" placeholder="10" defaultValue={10} />
+                </div>
+              </div>
+
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-1">Client Admin Login</p>
+              <div>
+                <label className="label">Admin Full Name <span className="text-red-500">*</span></label>
+                <input {...register('admin_name', { required: true })} className="input" placeholder="Admin name" />
+              </div>
+              <div>
+                <label className="label">Admin Email <span className="text-red-500">*</span></label>
+                <input type="email" {...register('admin_email', { required: true })} className="input" placeholder="admin@company.com" />
+              </div>
+              <div>
+                <label className="label">Admin Password <span className="text-red-500">*</span></label>
+                <input type="password" {...register('admin_password', { required: true, minLength: 6 })} className="input" placeholder="Min. 6 characters" />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button type="button" className="btn-secondary flex-1" onClick={() => { setShowModal(false); reset() }}>Cancel</button>
+                <button type="submit" className="btn-primary flex-1" disabled={createMutation.isPending}>
+                  {createMutation.isPending ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</> : 'Create Client'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

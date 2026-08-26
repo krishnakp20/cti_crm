@@ -50,12 +50,15 @@ class FormUpdate(BaseModel):
 @router.get("")
 async def list_forms(
     category: Optional[str] = None,
+    client_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Form)
     if current_user.role != UserRole.ADMIN:
         q = q.where(Form.client_id == current_user.client_id)
+    elif client_id:
+        q = q.where(Form.client_id == client_id)
     if category:
         q = q.where(Form.category == category)
     result = await db.execute(q.where(Form.is_active == True).order_by(Form.created_at.desc()))

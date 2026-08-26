@@ -5,6 +5,7 @@ import { ticketsApi } from '../../services/api'
 import { Plus, Search, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '../../utils/cn'
 import { format } from 'date-fns'
+import { useAdminClient } from '../../hooks/useAdminClient'
 
 const STATUS_TABS = [
   { label: 'All', value: '' },
@@ -29,10 +30,11 @@ export default function TicketsPage() {
   const status = params.get('status') || ''
   const search = params.get('search') || ''
   const [searchInput, setSearchInput] = useState(search)
+  const { clientFilter, adminClientId } = useAdminClient()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['tickets', page, status, search],
-    queryFn: () => ticketsApi.list({ page, limit: 20, status: status || undefined, search: search || undefined }).then(r => r.data),
+    queryKey: ['tickets', page, status, search, adminClientId],
+    queryFn: () => ticketsApi.list({ page, limit: 20, status: status || undefined, search: search || undefined, ...clientFilter }).then(r => r.data),
   })
 
   const tickets = data?.items || []

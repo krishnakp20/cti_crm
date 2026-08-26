@@ -5,7 +5,7 @@ import { toggleSidebar } from '../../redux/slices/uiSlice'
 import { logout } from '../../redux/slices/authSlice'
 import { cn } from '../../utils/cn'
 import {
-  LayoutDashboard, Ticket, FileText, Users, Building2, Phone, PhoneCall,
+  LayoutDashboard, Ticket, FileText, Users, Building2, Phone,
   Bell, BarChart3, Shield, Settings, LogOut, ChevronLeft, ChevronRight,
   Headphones, Megaphone, KeyRound, X,
 } from 'lucide-react'
@@ -64,83 +64,141 @@ export default function Sidebar({ onClose }: SidebarProps) {
   const dispatch = useDispatch()
   const navigate = useNavigate()
 
-  const canSee = (roles?: string[]) => !roles || roles.includes(user?.role || '')
+  const userPerms: string[] = (user as any)?.permissions || []
+  const hasCustomRole = !!(user as any)?.role_id
+
+  // Module → keyword that appears in permission slugs for that module
+  const MODULE_PERM: Record<string, string | null> = {
+    Dashboard:              null,          // always visible
+    Tickets:                'ticket',
+    Campaigns:              'campaign',
+    'Call Logs':            'calling',
+    'Agent Panel':          'calling',
+    'Form Builder':         'form',
+    'Alerts & Escalations': 'alert',
+    Users:                  'user',
+    Permissions:            'user',
+    Clients:                'client',
+    Reports:                'report',
+    'Ticket Export':        'export_ticket',
+    'Audit Logs':           'audit',
+  }
+
+  const canSee = (roles?: string[], label?: string) => {
+    // Role-based gate first
+    if (roles && !roles.includes(user?.role || '')) return false
+    // If user has a custom role with permissions assigned, enforce them
+    if (hasCustomRole && userPerms.length > 0 && label) {
+      const keyword = MODULE_PERM[label]
+      if (keyword === null) return true       // null = always show
+      if (keyword) return userPerms.some(p => p.includes(keyword))
+    }
+    return true
+  }
 
   const handleLogout = () => {
     dispatch(logout())
     navigate('/login')
   }
 
-  return (
-    <aside className={cn(
-      'flex flex-col bg-white dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800 h-screen',
-      // On desktop respect collapsed state; on mobile always full width
-      'transition-all duration-200',
-      collapsed ? 'w-14' : 'w-56',
-      'lg:w-auto', // let desktop width be controlled by collapsed state
-    )} style={{ width: collapsed ? '3.5rem' : '14rem' }}>
+  const initial = user?.full_name?.charAt(0).toUpperCase() || '?'
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
-        {!collapsed && (
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0">
-              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+  return (
+    <aside
+      className="flex flex-col h-screen transition-all duration-200 flex-shrink-0"
+      style={{
+        width: collapsed ? '3.5rem' : '14rem',
+        background: 'linear-gradient(180deg, #004f6a 0%, #003347 40%, #002233 100%)',
+      }}
+    >
+      {/* Logo header */}
+      <div
+        className="flex items-center flex-shrink-0 px-3 py-3"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', minHeight: '3.5rem' }}
+      >
+        {collapsed ? (
+          <div className="mx-auto flex items-center justify-center">
+            {/* Colored mark: red circle (logo icon) */}
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-white text-lg"
+              style={{ background: '#e30023' }}>
+              D
             </div>
-            <span className="font-bold text-sm text-gray-900 dark:text-white">CTI CRM</span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between w-full">
+            {/* Logo on white pill */}
+            <div className="bg-white rounded-xl px-3 py-1.5 flex items-center" style={{ height: '2.5rem' }}>
+              <img src="/dialdesk-logo.svg" alt="DialDesk" className="h-7 w-auto object-contain" />
+            </div>
+            <div className="flex items-center gap-1 ml-2">
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="lg:hidden p-1 rounded-lg hover:bg-white/10 transition-colors"
+                  style={{ color: 'rgba(255,255,255,0.6)' }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={() => dispatch(toggleSidebar())}
+                className="hidden lg:flex p-1 rounded-lg hover:bg-white/10 transition-colors"
+                style={{ color: 'rgba(255,255,255,0.6)' }}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
         {collapsed && (
-          <div className="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center mx-auto">
-            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-        )}
-
-        <div className="flex items-center gap-1 ml-auto">
-          {/* Mobile close button */}
-          {onClose && (
-            <button onClick={onClose} className="btn-icon lg:hidden">
-              <X className="w-4 h-4" />
-            </button>
-          )}
-          {/* Desktop collapse toggle */}
           <button
             onClick={() => dispatch(toggleSidebar())}
-            className="btn-icon hidden lg:flex"
-          >
-            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </button>
-        </div>
+            className="hidden lg:flex absolute p-1 rounded-lg hover:bg-white/10 transition-colors"
+            style={{ color: 'rgba(255,255,255,0.5)', right: '-1px', top: '0.75rem' }}
+          />
+        )}
       </div>
 
-      {/* User pill (mobile only, below header) */}
+      {/* Collapsed expand button */}
+      {collapsed && (
+        <button
+          onClick={() => dispatch(toggleSidebar())}
+          className="hidden lg:flex mx-auto mt-2 p-1 rounded-lg hover:bg-white/10 transition-colors"
+          style={{ color: 'rgba(255,255,255,0.5)' }}
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      )}
+
+      {/* User pill — mobile only */}
       {!collapsed && (
-        <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 lg:hidden">
-          <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-            {user?.full_name?.charAt(0).toUpperCase()}
+        <div
+          className="flex items-center gap-2.5 px-3 py-2.5 lg:hidden"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+            style={{ background: '#e30023' }}>
+            {initial}
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">{user?.full_name}</p>
-            <p className="text-2xs text-gray-400 capitalize">{user?.role?.replace('_', ' ')}</p>
+            <p className="text-xs font-semibold text-white truncate">{user?.full_name}</p>
+            <p className="text-2xs capitalize" style={{ color: 'rgba(255,255,255,0.5)' }}>{user?.role?.replace('_', ' ')}</p>
           </div>
         </div>
       )}
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
         {navGroups.map(group => {
           if (!canSee(group.roles as string[])) return null
-          const visibleItems = group.items.filter(item => canSee((item as any).roles))
+          const visibleItems = group.items.filter(item => canSee((item as any).roles, item.label))
           if (!visibleItems.length) return null
 
           return (
             <div key={group.label} className="mb-3">
               {!collapsed && (
-                <p className="text-2xs font-semibold text-gray-400 dark:text-gray-600 uppercase tracking-wider px-2 mb-1">
+                <p className="px-2 mb-1.5 text-xs font-semibold"
+                  style={{ color: 'rgba(255,255,255,0.38)', letterSpacing: '0.04em' }}>
                   {group.label}
                 </p>
               )}
@@ -154,8 +212,15 @@ export default function Sidebar({ onClose }: SidebarProps) {
                   }
                   title={collapsed ? item.label : undefined}
                 >
-                  <item.icon className="w-4 h-4 flex-shrink-0" />
-                  {!collapsed && <span className="truncate">{item.label}</span>}
+                  {({ isActive }) => (
+                    <>
+                      <item.icon className={cn('w-4 h-4 flex-shrink-0', isActive ? 'text-gold-400' : '')} />
+                      {!collapsed && <span className="truncate">{item.label}</span>}
+                      {!collapsed && isActive && (
+                        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-gold-400 flex-shrink-0" />
+                      )}
+                    </>
+                  )}
                 </NavLink>
               ))}
             </div>
@@ -164,7 +229,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
       </nav>
 
       {/* Bottom */}
-      <div className="border-t border-gray-100 dark:border-gray-800 p-2 space-y-0.5 flex-shrink-0">
+      <div className="flex-shrink-0 px-2 pb-3 space-y-0.5" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.5rem' }}>
         <NavLink
           to="/settings"
           className={({ isActive }) => cn('sidebar-item', isActive && 'sidebar-item-active', collapsed && 'justify-center px-2')}
@@ -175,10 +240,10 @@ export default function Sidebar({ onClose }: SidebarProps) {
         </NavLink>
         <button
           onClick={handleLogout}
-          className={cn('sidebar-item w-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 hover:text-red-600', collapsed && 'justify-center px-2')}
+          className={cn('sidebar-item w-full hover:!bg-brand-500/15 hover:!text-brand-300', collapsed && 'justify-center px-2')}
           title={collapsed ? 'Logout' : undefined}
         >
-          <LogOut className="w-4 h-4 flex-shrink-0" />
+          <LogOut className="w-4 h-4 flex-shrink-0 text-brand-400" />
           {!collapsed && <span>Logout</span>}
         </button>
       </div>

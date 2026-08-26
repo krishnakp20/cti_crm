@@ -61,6 +61,7 @@ export const ticketsApi = {
 
 export const clientsApi = {
   list: (params?: any) => api.get('/clients', { params }),
+  create: (data: any) => api.post('/clients', data),
   get: (id: number) => api.get(`/clients/${id}`),
   me: () => api.get('/clients/me'),
   update: (id: number, data: any) => api.patch(`/clients/${id}`, data),
@@ -110,7 +111,7 @@ export const callsApi = {
 }
 
 export const alertsApi = {
-  list: () => api.get('/alerts'),
+  list: (params?: any) => api.get('/alerts', { params }),
   get: (id: number) => api.get(`/alerts/${id}`),
   create: (data: any) => api.post('/alerts', data),
   update: (id: number, data: any) => api.patch(`/alerts/${id}`, data),
@@ -118,7 +119,7 @@ export const alertsApi = {
   delete: (id: number) => api.delete(`/alerts/${id}`),
   listTemplates: () => api.get('/alerts/templates'),
   createTemplate: (data: any) => api.post('/alerts/templates', data),
-  listEscalations: () => api.get('/alerts/escalations'),
+  listEscalations: (params?: any) => api.get('/alerts/escalations', { params }),
   createEscalation: (data: any) => api.post('/alerts/escalations', data),
   updateEscalation: (id: number, data: any) => api.patch(`/alerts/escalations/${id}`, data),
   deleteEscalation: (id: number) => api.delete(`/alerts/escalations/${id}`),
@@ -126,7 +127,7 @@ export const alertsApi = {
 }
 
 export const reportsApi = {
-  dashboard: () => api.get('/reports/dashboard'),
+  dashboard: (params?: any) => api.get('/reports/dashboard', { params }),
   tickets: (params?: any) => api.get('/reports/tickets', { params }),
   calls: (params?: any) => api.get('/reports/calls', { params }),
   agentProductivity: (params?: any) => api.get('/reports/agent-productivity', { params }),

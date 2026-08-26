@@ -5,6 +5,7 @@ import { Plus, Edit2, Trash2, FileText, Eye } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 import { cn } from '../../utils/cn'
+import { useAdminClient } from '../../hooks/useAdminClient'
 
 const CATEGORY_COLORS: any = {
   ticket: 'bg-blue-100 text-blue-700',
@@ -15,7 +16,11 @@ const CATEGORY_COLORS: any = {
 export default function FormsPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const { data: forms, isLoading } = useQuery({ queryKey: ['forms'], queryFn: () => formsApi.list().then(r => r.data) })
+  const { clientFilter, adminClientId } = useAdminClient()
+  const { data: forms, isLoading } = useQuery({
+    queryKey: ['forms', adminClientId],
+    queryFn: () => formsApi.list(clientFilter).then(r => r.data),
+  })
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => formsApi.delete(id),

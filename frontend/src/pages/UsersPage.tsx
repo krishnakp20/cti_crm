@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { usersApi } from '../services/api'
-import { useForm } from 'react-hook-form'
-import { Plus, Search, X, Loader2, UserCheck, UserX } from 'lucide-react'
+import { usersApi, clientsApi } from '../services/api'
+import { useSelector } from 'react-redux'
+import { RootState } from '../redux/store'
+import { useForm, useWatch } from 'react-hook-form'
+import { Plus, Search, X, Loader2, UserCheck, UserX, Settings2, Building2 } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 import { cn } from '../utils/cn'
+import api from '../services/api'
+import { useAdminClient } from '../hooks/useAdminClient'
 
 const ROLE_COLORS: any = {
   admin: 'badge bg-red-100 text-red-700',
@@ -18,12 +22,23 @@ export default function UsersPage() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [showModal, setShowModal] = useState(false)
+  const [dialerUser, setDialerUser] = useState<any>(null)  // user being edited in dialer modal
+  const [dialerSaving, setDialerSaving] = useState(false)
   const qc = useQueryClient()
-  const { register, handleSubmit, reset } = useForm()
+  const { register, handleSubmit, reset, control } = useForm()
+  const watchConnectionType = useWatch({ control, name: 'connection_type', defaultValue: 'remote' })
+  const currentUser = useSelector((s: RootState) => s.auth.user)
+  const { clientFilter, adminClientId, adminClientName } = useAdminClient()
+
+  const { data: clientsData } = useQuery({
+    queryKey: ['clients-list'],
+    queryFn: () => clientsApi.list({ limit: 100 }).then(r => r.data),
+    enabled: currentUser?.role === 'admin',
+  })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['users', page, search],
-    queryFn: () => usersApi.list({ page, limit: 20, search: search || undefined }).then(r => r.data),
+    queryKey: ['users', page, search, adminClientId],
+    queryFn: () => usersApi.list({ page, limit: 20, search: search || undefined, ...clientFilter }).then(r => r.data),
   })
 
   const createMutation = useMutation({
@@ -42,6 +57,19 @@ export default function UsersPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('Updated') },
   })
 
+  const saveDialerSettings = async (u: any, settings: any) => {
+    setDialerSaving(true)
+    try {
+      await api.patch(`/users/${u.id}`, settings)
+      qc.invalidateQueries({ queryKey: ['users'] })
+      toast.success('Dialer settings saved')
+      setDialerUser(null)
+    } catch {
+      toast.error('Failed to save')
+    }
+    setDialerSaving(false)
+  }
+
   const users = data?.items || []
 
   return (
@@ -49,12 +77,18 @@ export default function UsersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-gray-900 dark:text-white">Users</h1>
-          <p className="text-xs text-gray-500">{data?.total || 0} users</p>
+          <p className="text-xs text-gray-500">{data?.total || 0} users{adminClientName ? ` — ${adminClientName}` : ''}</p>
         </div>
         <button className="btn-primary" onClick={() => setShowModal(true)}>
           <Plus className="w-3.5 h-3.5" /> Add User
         </button>
       </div>
+      {adminClientId && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg text-xs text-primary-700 dark:text-primary-300">
+          <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+          Filtered to: <span className="font-semibold">{adminClientName}</span>
+        </div>
+      )}
 
       <div className="card">
         <div className="p-3 border-b border-gray-100 dark:border-gray-800">
@@ -105,13 +139,24 @@ export default function UsersPage() {
                     </td>
                     <td className="td text-xs text-gray-400">{user.last_login ? format(new Date(user.last_login), 'MMM d, HH:mm') : 'Never'}</td>
                     <td className="td">
-                      <button
-                        className={cn('btn-icon', user.is_active ? 'text-red-400 hover:text-red-600' : 'text-green-500 hover:text-green-700')}
-                        onClick={() => toggleActiveMutation.mutate({ id: user.id, is_active: !user.is_active })}
-                        title={user.is_active ? 'Deactivate' : 'Activate'}
-                      >
-                        {user.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {user.role === 'agent' && (
+                          <button
+                            className="btn-icon text-blue-400 hover:text-blue-600"
+                            onClick={() => setDialerUser(user)}
+                            title="Dialer Settings"
+                          >
+                            <Settings2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          className={cn('btn-icon', user.is_active ? 'text-red-400 hover:text-red-600' : 'text-green-500 hover:text-green-700')}
+                          onClick={() => toggleActiveMutation.mutate({ id: user.id, is_active: !user.is_active })}
+                          title={user.is_active ? 'Deactivate' : 'Activate'}
+                        >
+                          {user.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -153,6 +198,46 @@ export default function UsersPage() {
                   <option value="client">Client Admin</option>
                 </select>
               </div>
+              {currentUser?.role === 'admin' && (
+                <div>
+                  <label className="label">Assign to Client</label>
+                  <select {...register('client_id')} className="input">
+                    <option value="">— Select Client —</option>
+                    {(clientsData?.items || []).map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.company_name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="label">ViciDial Agent User ID</label>
+                <input {...register('dialer_user')} className="input" placeholder="e.g. 7231 (optional)" />
+              </div>
+              <div>
+                <label className="label">Connection Type</label>
+                <select {...register('connection_type')} className="input">
+                  <option value="remote">Remote (call forwarding to mobile)</option>
+                  <option value="webrtc">WebRTC (browser softphone)</option>
+                </select>
+              </div>
+              {watchConnectionType === 'remote' && (
+                <div>
+                  <label className="label">Agent Mobile (for call forwarding)</label>
+                  <input {...register('agent_mobile')} className="input" placeholder="+91 9999999999" />
+                </div>
+              )}
+              {watchConnectionType === 'webrtc' && (
+                <>
+                  <div>
+                    <label className="label">SIP Server URL</label>
+                    <input {...register('sip_server_url')} className="input" placeholder="wss://192.168.10.30:8089/ws" />
+                  </div>
+                  <div>
+                    <label className="label">SIP Password</label>
+                    <input type="password" {...register('sip_password')} className="input" placeholder="Asterisk SIP password" />
+                  </div>
+                </>
+              )}
               <div className="flex gap-2 pt-2">
                 <button type="button" className="btn-secondary flex-1" onClick={() => { setShowModal(false); reset() }}>Cancel</button>
                 <button type="submit" className="btn-primary flex-1" disabled={createMutation.isPending}>
@@ -163,6 +248,104 @@ export default function UsersPage() {
           </div>
         </div>
       )}
+
+      {/* ── Dialer Settings Modal (per agent) ─────────────────────────────────── */}
+      {dialerUser && (
+        <DialerSettingsModal
+          user={dialerUser}
+          onClose={() => setDialerUser(null)}
+          onSave={saveDialerSettings}
+          saving={dialerSaving}
+        />
+      )}
+    </div>
+  )
+}
+
+function DialerSettingsModal({ user, onClose, onSave, saving }: {
+  user: any; onClose: () => void
+  onSave: (u: any, settings: any) => void; saving: boolean
+}) {
+  const [connType, setConnType] = useState<'remote' | 'webrtc'>(user.connection_type || 'remote')
+  const [agentMobile, setAgentMobile] = useState(user.agent_mobile || '')
+  const [sipServerUrl, setSipServerUrl] = useState(user.sip_server_url || '')
+  const [sipPassword, setSipPassword] = useState('')
+  const [dialerUserId, setDialerUserId] = useState(user.dialer_user || '')
+  const [extension, setExtension] = useState(user.extension || '')
+
+  const handleSave = () => {
+    const settings: any = {
+      connection_type: connType,
+      dialer_user: dialerUserId || null,
+      agent_mobile: connType === 'remote' ? (agentMobile || null) : null,
+      sip_server_url: connType === 'webrtc' ? (sipServerUrl || null) : null,
+    }
+    if (connType === 'webrtc' && sipPassword) settings.sip_password = sipPassword
+    onSave(user, settings)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="card p-5 w-full max-w-md animate-fade-in max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white">Dialer Settings</h3>
+            <p className="text-xs text-gray-500">{user.full_name} — {user.email}</p>
+          </div>
+          <button className="btn-icon" onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="label">ViciDial Agent User ID</label>
+            <input className="input" placeholder="e.g. 7231" value={dialerUserId} onChange={e => setDialerUserId(e.target.value)} />
+            <p className="text-2xs text-gray-400 mt-1">ViciDial Admin → Agents → Agent User column</p>
+          </div>
+          <div>
+            <label className="label">SIP Extension (ViciBox)</label>
+            <input className="input" placeholder="e.g. 8001" value={extension} onChange={e => setExtension(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Connection Type</label>
+            <select className="input" value={connType} onChange={e => setConnType(e.target.value as any)}>
+              <option value="remote">Remote — call forwarding to mobile phone</option>
+              <option value="webrtc">WebRTC — browser-based softphone (no mobile needed)</option>
+            </select>
+          </div>
+
+          {connType === 'remote' && (
+            <div>
+              <label className="label">Agent Mobile Number</label>
+              <input className="input" placeholder="+91 9999999999" value={agentMobile} onChange={e => setAgentMobile(e.target.value)} />
+              <p className="text-2xs text-gray-400 mt-1">ViciDial will forward calls to this number.</p>
+            </div>
+          )}
+
+          {connType === 'webrtc' && (
+            <>
+              <div>
+                <label className="label">SIP Server URL</label>
+                <input className="input" placeholder="wss://192.168.10.30:8089/ws" value={sipServerUrl} onChange={e => setSipServerUrl(e.target.value)} />
+                <p className="text-2xs text-gray-400 mt-1">Asterisk WebSocket endpoint. Port 8089 is standard for ViciBox.</p>
+              </div>
+              <div>
+                <label className="label">SIP Password {sipPassword === '' && <span className="text-gray-400 font-normal">(leave blank to keep existing)</span>}</label>
+                <input type="password" className="input" placeholder="Asterisk SIP extension password" value={sipPassword} onChange={e => setSipPassword(e.target.value)} />
+              </div>
+              <div className="text-xs text-blue-700 bg-blue-50 rounded-lg p-3 dark:bg-blue-900/20 dark:text-blue-300">
+                Agent will use this browser as a softphone. Calls from ViciDial will ring in the browser — no mobile number needed.
+              </div>
+            </>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <button className="btn-secondary flex-1" onClick={onClose}>Cancel</button>
+            <button className="btn-primary flex-1" onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Settings'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

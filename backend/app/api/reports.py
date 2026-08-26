@@ -14,10 +14,14 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 @router.get("/dashboard")
 async def dashboard_stats(
+    client_id: Optional[int] = None,  # admin can pass specific client_id
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    client_id = current_user.client_id  # None for admin = show all
+    # For non-admin, always scope to own client; for admin, use provided client_id (or all if None)
+    if current_user.role != UserRole.ADMIN:
+        client_id = current_user.client_id
+    # else: admin uses provided client_id or None (all)
 
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today - timedelta(days=today.weekday())

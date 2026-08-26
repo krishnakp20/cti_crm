@@ -40,6 +40,10 @@ class User(Base):
     extra_data: Mapped[Optional[dict]] = mapped_column(JSON)
     extension: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # ViciBox SIP extension
     dialer_user: Mapped[Optional[str]] = mapped_column(String(100), index=True)  # ViciDial agent login (e.g. "1001")
+    connection_type: Mapped[str] = mapped_column(String(20), default="remote")  # "remote" or "webrtc"
+    agent_mobile: Mapped[Optional[str]] = mapped_column(String(30))  # for remote mode
+    sip_password: Mapped[Optional[str]] = mapped_column(String(255))  # for webrtc mode
+    sip_server_url: Mapped[Optional[str]] = mapped_column(String(500))  # e.g. wss://192.168.10.30:8089/ws
 
     client: Mapped[Optional["Client"]] = relationship("Client", back_populates="users", foreign_keys=[client_id])
     department: Mapped[Optional["Department"]] = relationship("Department", back_populates="users", foreign_keys=[department_id])

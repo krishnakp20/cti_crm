@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { alertsApi } from '../services/api'
+import { useAdminClient } from '../hooks/useAdminClient'
 import { useForm } from 'react-hook-form'
 import {
   Plus, Bell, GitBranch, Trash2, X,
@@ -376,9 +377,10 @@ export default function AlertsPage() {
   const [editingAlert,       setEditingAlert]         = useState<any>(null)
   const [editingEscalation,  setEditingEscalation]    = useState<any>(null)
   const qc = useQueryClient()
+  const { clientFilter, adminClientId } = useAdminClient()
 
-  const { data: alerts = [],      isLoading: alertsLoading }      = useQuery({ queryKey: ['alerts'],      queryFn: () => alertsApi.list().then(r => r.data) })
-  const { data: escalations = [], isLoading: escalationsLoading } = useQuery({ queryKey: ['escalations'], queryFn: () => alertsApi.listEscalations().then(r => r.data) })
+  const { data: alerts = [],      isLoading: alertsLoading }      = useQuery({ queryKey: ['alerts', adminClientId],      queryFn: () => alertsApi.list(clientFilter).then(r => r.data) })
+  const { data: escalations = [], isLoading: escalationsLoading } = useQuery({ queryKey: ['escalations', adminClientId], queryFn: () => alertsApi.listEscalations(clientFilter).then(r => r.data) })
 
   const inv = (keys: string[]) => keys.forEach(k => qc.invalidateQueries({ queryKey: [k] }))
 

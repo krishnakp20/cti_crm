@@ -38,7 +38,7 @@ export default function TicketReportPage() {
       priority: priority || undefined,
       from_date: fromDate || undefined,
       to_date: toDate || undefined,
-      limit: 200,
+      limit: 500,
     }).then(r => r.data),
   })
 
