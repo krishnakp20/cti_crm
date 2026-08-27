@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ticketsApi } from '../../services/api'
 import api from '../../services/api'
+import { useAdminClient } from '../../hooks/useAdminClient'
 import { Download, Filter, FileSpreadsheet, Loader2, RefreshCw } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '../../utils/cn'
@@ -30,15 +31,17 @@ export default function TicketReportPage() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [downloading, setDownloading] = useState(false)
+  const { adminClientId, clientFilter } = useAdminClient()
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['ticket-report', status, priority, fromDate, toDate],
+    queryKey: ['ticket-report', status, priority, fromDate, toDate, adminClientId],
     queryFn: () => ticketsApi.list({
       status: status || undefined,
       priority: priority || undefined,
       from_date: fromDate || undefined,
       to_date: toDate || undefined,
       limit: 500,
+      ...clientFilter,
     }).then(r => r.data),
   })
 
@@ -66,6 +69,7 @@ export default function TicketReportPage() {
       if (priority) params.set('priority', priority)
       if (fromDate) params.set('from_date', fromDate)
       if (toDate) params.set('to_date', toDate)
+      if (adminClientId) params.set('client_id', String(adminClientId))
 
       const res = await api.get(`/tickets/export?${params.toString()}`, { responseType: 'blob' })
       const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
