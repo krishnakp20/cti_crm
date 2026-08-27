@@ -18,7 +18,17 @@ const inputCls = 'w-full px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 borde
 
 export default function TicketNewPage() {
   const navigate = useNavigate()
-  const { register, handleSubmit, watch, setValue } = useForm({ defaultValues: { priority: 'medium' } })
+  const { register, handleSubmit, watch, setValue } = useForm({
+    defaultValues: {
+      priority: 'medium',
+      subject: '',
+      description: '',
+      customer_name: '',
+      customer_mobile: '',
+      customer_email: '',
+      form_id: '',
+    }
+  })
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [priority, setPriority] = useState('medium')
 
