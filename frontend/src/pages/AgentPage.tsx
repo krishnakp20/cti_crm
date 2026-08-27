@@ -106,11 +106,15 @@ interface SipConfig {
   domain: string    // e.g. "192.168.10.30"
 }
 
-function useWebRTCSoftphone(config: SipConfig | null) {
+function useWebRTCSoftphone(config: SipConfig | null, onIncomingCall?: (callerId: string, callerName: string) => void, onCallEnded?: () => void) {
   const [status, setStatus] = useState<SipStatus>('idle')
   const [callSession, setCallSession] = useState<any>(null)
   const uaRef = useRef<any>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const onIncomingCallRef = useRef(onIncomingCall)
+  const onCallEndedRef = useRef(onCallEnded)
+  onIncomingCallRef.current = onIncomingCall
+  onCallEndedRef.current = onCallEnded
 
   useEffect(() => {
     if (!config) return
@@ -142,12 +146,17 @@ function useWebRTCSoftphone(config: SipConfig | null) {
       const session = e.session
       if (session.direction !== 'incoming') return
 
+      // Extract caller ID from SIP From header
+      const callerId: string = session.remote_identity?.uri?.user || 'Unknown'
+      const callerName: string = session.remote_identity?.display_name || ''
+      onIncomingCallRef.current?.(callerId, callerName)
+
       setStatus('ringing')
       setCallSession(session)
 
       session.on('accepted', () => setStatus('in_call'))
-      session.on('ended', () => { setStatus('registered'); setCallSession(null) })
-      session.on('failed', () => { setStatus('registered'); setCallSession(null) })
+      session.on('ended', () => { setStatus('registered'); setCallSession(null); onCallEndedRef.current?.() })
+      session.on('failed', () => { setStatus('registered'); setCallSession(null); onCallEndedRef.current?.() })
 
       session.on('peerconnection', (pe: any) => {
         const pc: RTCPeerConnection = pe.peerconnection
@@ -396,7 +405,29 @@ export default function AgentPage() {
       }
     : null
 
-  const { status: sipStatus, hangup: sipHangup } = useWebRTCSoftphone(sipConfig)
+  const handleWebRTCIncoming = useCallback((callerId: string, callerName: string) => {
+    handleCallArrive({
+      uniqueid: `webrtc-${Date.now()}`,
+      caller_id: callerId,
+      caller_name: callerName,
+    })
+  }, [handleCallArrive])
+
+  const handleWebRTCEnded = useCallback(() => {
+    // If call ends from remote side without agent ending it, trigger wrap-up
+    setActiveCall(prev => {
+      if (prev) {
+        setWrapup({ call: prev, formValues })
+        setWrapupDisposition('')
+        setWrapupSummary(callSummary)
+        setWrapupTags([...callTags])
+        return null
+      }
+      return prev
+    })
+  }, [formValues, callSummary, callTags])
+
+  const { status: sipStatus, hangup: sipHangup } = useWebRTCSoftphone(sipConfig, handleWebRTCIncoming, handleWebRTCEnded)
 
   const { data: tickets } = useQuery({
     queryKey: ['agent-tickets'],
