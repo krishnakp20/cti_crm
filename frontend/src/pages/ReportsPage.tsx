@@ -1,16 +1,18 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { reportsApi } from '../services/api'
+import { useAdminClient } from '../hooks/useAdminClient'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import { BarChart3, Download, Filter } from 'lucide-react'
 import { cn } from '../utils/cn'
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<'tickets' | 'calls' | 'agents'>('tickets')
+  const { adminClientId, clientFilter } = useAdminClient()
 
-  const { data: ticketData } = useQuery({ queryKey: ['report-tickets'], queryFn: () => reportsApi.tickets().then(r => r.data) })
-  const { data: callData } = useQuery({ queryKey: ['report-calls'], queryFn: () => reportsApi.calls().then(r => r.data) })
-  const { data: agentData } = useQuery({ queryKey: ['report-agents'], queryFn: () => reportsApi.agentProductivity().then(r => r.data) })
+  const { data: ticketData } = useQuery({ queryKey: ['report-tickets', adminClientId], queryFn: () => reportsApi.tickets(clientFilter).then(r => r.data) })
+  const { data: callData } = useQuery({ queryKey: ['report-calls', adminClientId], queryFn: () => reportsApi.calls(clientFilter).then(r => r.data) })
+  const { data: agentData } = useQuery({ queryKey: ['report-agents', adminClientId], queryFn: () => reportsApi.agentProductivity(clientFilter).then(r => r.data) })
 
   const tabs = [
     { id: 'tickets', label: 'Ticket Reports' },
