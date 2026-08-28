@@ -142,3 +142,13 @@ export const notificationsApi = {
 export const auditApi = {
   list: (params?: any) => api.get('/audit', { params }),
 }
+
+export const teamsApi = {
+  list: (params?: any) => api.get('/teams', { params }),
+  get: (id: number) => api.get(`/teams/${id}`),
+  create: (data: any) => api.post('/teams', data),
+  update: (id: number, data: any) => api.patch(`/teams/${id}`, data),
+  delete: (id: number) => api.delete(`/teams/${id}`),
+  addMember: (teamId: number, userId: number) => api.post(`/teams/${teamId}/members`, { user_id: userId }),
+  removeMember: (teamId: number, userId: number) => api.delete(`/teams/${teamId}/members/${userId}`),
+}

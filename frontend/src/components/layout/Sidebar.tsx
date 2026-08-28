@@ -40,6 +40,7 @@ const navGroups = [
     roles: ['admin', 'client'],
     items: [
       { to: '/users', icon: Users, label: 'Users' },
+      { to: '/teams', icon: Users, label: 'Teams' },
       { to: '/permissions', icon: KeyRound, label: 'Permissions' },
       { to: '/clients', icon: Building2, label: 'Clients', roles: ['admin'] },
     ],

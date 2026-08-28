@@ -67,8 +67,9 @@ class Team(Base):
     __tablename__ = "teams"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_id: Mapped[int] = mapped_column(Integer, ForeignKey("clients.id", ondelete="CASCADE"))
+    client_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("clients.id", ondelete="CASCADE"))
     department_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("departments.id"))
+    department_name: Mapped[Optional[str]] = mapped_column(String(100))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     team_lead_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))

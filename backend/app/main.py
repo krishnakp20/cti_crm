@@ -7,7 +7,7 @@ from loguru import logger
 from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
 from app.core.seed import seed_database
-from app.api import auth, clients, users, tickets, forms, calls, alerts, notifications, reports, audit
+from app.api import auth, clients, users, tickets, forms, calls, alerts, notifications, reports, audit, teams
 from app.websocket.router import router as ws_router
 
 
@@ -51,6 +51,7 @@ app.include_router(alerts.router, prefix=API_PREFIX)
 app.include_router(notifications.router, prefix=API_PREFIX)
 app.include_router(reports.router, prefix=API_PREFIX)
 app.include_router(audit.router, prefix=API_PREFIX)
+app.include_router(teams.router, prefix=API_PREFIX)
 app.include_router(ws_router)
 
 
