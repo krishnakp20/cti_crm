@@ -88,21 +88,16 @@ class AMIClient:
         # -- IVR direct-dial tracking (no queues) --
 
         if event == "Newchannel":
-            # Track inbound channels so we know callers waiting in IVR
+            # Only track — do NOT create CDR here (QueueCallerJoin does that)
             context = pkt.get("Context", "")
-            if context in ("from-vicidial", "ivr-main"):
-                caller = pkt.get("CallerIDNum", "")
-                if caller and uid not in self._queue_callers:
-                    self._queue_callers[uid] = datetime.now(timezone.utc)
-                    await self._broadcast({
-                        "type": "queue_join",
-                        "uniqueid": uid,
+            caller = pkt.get("CallerIDNum", "")
+            if context in ("from-vicidial", "ivr-main") and caller:
+                if uid not in self._queue_callers:
+                    self._queue_callers[uid] = {
                         "caller": caller,
                         "queue": "IVR",
-                        "position": len(self._queue_callers),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                    await self._save_cdr_queue_join(uid, pkt)
+                        "time": datetime.now(timezone.utc),
+                    }
 
         elif event == "DialBegin":
             # Caller is now ringing an agent
@@ -135,10 +130,10 @@ class AMIClient:
             if call and pkt.get("DialStatus") == "ANSWER":
                 call["answered"] = True
                 call["answer_time"] = datetime.now(timezone.utc)
-                # resolve queue wait duration
-                if uid in self._queue_callers:
+                entry = self._queue_callers.get(uid)
+                if entry and isinstance(entry, dict):
                     call["queue_duration"] = int(
-                        (call["answer_time"] - self._queue_callers[uid]).total_seconds()
+                        (call["answer_time"] - entry["time"]).total_seconds()
                     )
                 await self._broadcast({
                     "type": "agent_connect",
@@ -170,36 +165,78 @@ class AMIClient:
                     await self._broadcast({"type": "call_abandoned", "uniqueid": uid})
                     await self._save_cdr_abandoned(uid, pkt)
 
-        # Queue-based events (future use)
+        # Queue-based events
         elif event == "QueueCallerJoin":
-            self._queue_callers[uid] = datetime.now(timezone.utc)
+            caller = pkt.get("CallerIDNum", "")
+            queue = pkt.get("Queue", "")
+            self._queue_callers[uid] = {
+                "caller": caller,
+                "queue": queue,
+                "department": _queue_to_dept(queue),
+                "position": pkt.get("Position", "1"),
+                "time": datetime.now(timezone.utc),
+            }
             await self._broadcast({
                 "type": "queue_join",
                 "uniqueid": uid,
-                "caller": pkt.get("CallerIDNum", ""),
-                "queue": pkt.get("Queue", ""),
+                "caller": caller,
+                "queue": queue,
+                "department": _queue_to_dept(queue),
                 "position": pkt.get("Position", ""),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
             await self._save_cdr_queue_join(uid, pkt)
 
+        elif event == "QueueCallerLeave":
+            self._queue_callers.pop(uid, None)
+            await self._broadcast({
+                "type": "queue_leave",
+                "uniqueid": uid,
+                "queue": pkt.get("Queue", ""),
+            })
+
         elif event == "AgentConnect":
+            # AgentName from queue is like "PJSIP/2001" — strip prefix for display
+            raw_agent = pkt.get("AgentName", "")
+            agent_ext = raw_agent.replace("PJSIP/", "").replace("Local/", "").split("-")[0].split("@")[0]
+            caller = pkt.get("CallerIDNum", "")
+            queue = pkt.get("Queue", "")
+            dept = _queue_to_dept(queue)
+            # Try to get caller from queue_callers if not in pkt
+            entry = self._queue_callers.get(uid, {})
+            if not caller and isinstance(entry, dict):
+                caller = entry.get("caller", "")
             self._active_calls[uid] = {
-                "caller": pkt.get("CallerIDNum", ""),
-                "agent": pkt.get("AgentName", ""),
-                "department": _queue_to_dept(pkt.get("Queue", "")),
+                "caller": caller,
+                "agent": agent_ext,
+                "agent_ext": agent_ext,
+                "department": dept,
                 "start": datetime.now(timezone.utc),
                 "answered": True,
             }
+            self._queue_callers.pop(uid, None)
             await self._broadcast({
                 "type": "agent_connect",
                 "uniqueid": uid,
-                "agent": pkt.get("AgentName", ""),
-                "caller": pkt.get("CallerIDNum", ""),
-                "department": _queue_to_dept(pkt.get("Queue", "")),
+                "agent": agent_ext,
+                "caller": caller,
+                "department": dept,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
-            await self._save_cdr_agent_connect(uid, pkt, {})
+            await self._save_cdr_agent_connect(uid, pkt, {"agent_ext": agent_ext, "department": dept})
+
+        elif event in ("AgentComplete", "AgentDump"):
+            call = self._active_calls.pop(uid, {})
+            duration = int(pkt.get("TalkTime", 0))
+            await self._broadcast({
+                "type": "agent_complete",
+                "uniqueid": uid,
+                "agent": call.get("agent", ""),
+                "caller": call.get("caller", ""),
+                "department": call.get("department", ""),
+                "talk_time": str(duration),
+            })
+            await self._save_cdr_complete_hangup(uid, duration)
 
         elif event == "MixMonitorStart":
             await self._save_recording_path(uid, pkt.get("FileName", ""))
@@ -336,18 +373,32 @@ class AMIClient:
 
     def get_live_state(self) -> dict:
         """Return current active calls and queue for dashboard."""
+        now = datetime.now(timezone.utc)
+        queue_callers = []
+        for uid, v in self._queue_callers.items():
+            if isinstance(v, dict):
+                queue_callers.append({
+                    "uniqueid": uid,
+                    "caller": v.get("caller", ""),
+                    "queue": v.get("queue", ""),
+                    "department": v.get("department", ""),
+                    "position": v.get("position", ""),
+                    "wait": int((now - v["time"]).total_seconds()),
+                })
         return {
             "active_calls": [
                 {
                     "uniqueid": uid,
                     "caller": v["caller"],
-                    "agent": v["agent"],
-                    "queue": v["queue"],
-                    "duration": int((datetime.now(timezone.utc) - v["start"]).total_seconds()),
+                    "agent": v.get("agent", ""),
+                    "department": v.get("department", ""),
+                    "queue": v.get("department", ""),
+                    "duration": int((now - v["start"]).total_seconds()),
                 }
                 for uid, v in self._active_calls.items()
             ],
             "queue_count": len(self._queue_callers),
+            "queue_callers": queue_callers,
         }
 
 

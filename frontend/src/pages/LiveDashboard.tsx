@@ -19,6 +19,7 @@ interface QueueCaller {
   uniqueid: string
   caller: string
   queue: string
+  department?: string
   wait: number
   position: string
 }
@@ -26,7 +27,7 @@ interface QueueCaller {
 interface LiveState {
   active_calls: ActiveCall[]
   queue_count: number
-  queue_callers?: QueueCaller[]
+  queue_callers: QueueCaller[]
 }
 
 const DEPT_COLORS: Record<string, string> = {
@@ -46,7 +47,8 @@ function fmt(s: number) {
 
 export default function LiveDashboard() {
   const token = useSelector((s: RootState) => s.auth.accessToken)
-  const [live, setLive] = useState<LiveState>({ active_calls: [], queue_count: 0 })
+  const [live, setLive] = useState<LiveState>({ active_calls: [], queue_count: 0, queue_callers: [] })
+  const waitRef = useRef<Record<string, number>>({})
   const [connected, setConnected] = useState(false)
   const [tick, setTick] = useState(0)
   const wsRef = useRef<WebSocket | null>(null)
@@ -74,10 +76,16 @@ export default function LiveDashboard() {
         if (msg.type === 'ping') return
 
         if (msg.type === 'init' || msg.type === 'state') {
-          setLive({ active_calls: msg.active_calls || [], queue_count: msg.queue_count || 0 })
-          // seed durations
+          setLive({
+            active_calls: msg.active_calls || [],
+            queue_count: msg.queue_count || 0,
+            queue_callers: msg.queue_callers || [],
+          })
           ;(msg.active_calls || []).forEach((c: ActiveCall) => {
             if (durationsRef.current[c.uniqueid] === undefined) durationsRef.current[c.uniqueid] = c.duration
+          })
+          ;(msg.queue_callers || []).forEach((c: QueueCaller) => {
+            if (waitRef.current[c.uniqueid] === undefined) waitRef.current[c.uniqueid] = c.wait
           })
         }
 
@@ -95,9 +103,11 @@ export default function LiveDashboard() {
 
         if (msg.type === 'agent_connect') {
           durationsRef.current[msg.uniqueid] = 0
+          delete waitRef.current[msg.uniqueid]
           setLive(prev => ({
             ...prev,
             queue_count: Math.max(0, prev.queue_count - 1),
+            queue_callers: prev.queue_callers.filter(c => c.uniqueid !== msg.uniqueid),
             active_calls: [
               ...prev.active_calls.filter(c => c.uniqueid !== msg.uniqueid),
               { uniqueid: msg.uniqueid, caller: msg.caller, agent: msg.agent, queue: msg.department || msg.queue || '', department: msg.department, duration: 0, ringing: false },
@@ -114,11 +124,24 @@ export default function LiveDashboard() {
         }
 
         if (msg.type === 'queue_join') {
-          setLive(prev => ({ ...prev, queue_count: prev.queue_count + 1 }))
+          waitRef.current[msg.uniqueid] = 0
+          setLive(prev => ({
+            ...prev,
+            queue_count: prev.queue_count + 1,
+            queue_callers: [
+              ...prev.queue_callers.filter(c => c.uniqueid !== msg.uniqueid),
+              { uniqueid: msg.uniqueid, caller: msg.caller, queue: msg.queue, department: msg.department, wait: 0, position: msg.position || '' },
+            ],
+          }))
         }
 
         if (msg.type === 'queue_leave') {
-          setLive(prev => ({ ...prev, queue_count: Math.max(0, prev.queue_count - 1) }))
+          delete waitRef.current[msg.uniqueid]
+          setLive(prev => ({
+            ...prev,
+            queue_count: Math.max(0, prev.queue_count - 1),
+            queue_callers: prev.queue_callers.filter(c => c.uniqueid !== msg.uniqueid),
+          }))
         }
       } catch { /* ignore parse errors */ }
     }
@@ -250,9 +273,44 @@ export default function LiveDashboard() {
             <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Waiting in Queue</h2>
             <span className="ml-auto text-xs text-amber-500 font-semibold">{totalWaiting} waiting</span>
           </div>
-          <div className="px-4 py-8 text-center text-gray-400 text-sm">
-            {totalWaiting} caller{totalWaiting > 1 ? 's' : ''} in queue — live caller details update via AMI events
-          </div>
+          {live.queue_callers.length === 0 ? (
+            <div className="px-4 py-6 text-center text-gray-400 text-sm">
+              {totalWaiting} caller{totalWaiting > 1 ? 's' : ''} waiting — details loading…
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50 dark:divide-gray-800">
+              {live.queue_callers.map(c => {
+                const waitSecs = (waitRef.current[c.uniqueid] ?? c.wait) + tick * 0
+                // increment wait counter every tick
+                if (waitRef.current[c.uniqueid] !== undefined) waitRef.current[c.uniqueid]++
+                const dept = c.department || _queueToDept(c.queue)
+                return (
+                  <div key={c.uniqueid} className="flex items-center gap-4 px-4 py-3">
+                    <div className="relative flex-shrink-0">
+                      <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                      <div className="absolute inset-0 rounded-full bg-amber-300 animate-ping opacity-75" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{c.caller || 'Unknown'}</p>
+                        {dept && (
+                          <span className={cn('px-2 py-0.5 rounded-full text-2xs font-medium',
+                            DEPT_COLORS[dept] || 'bg-gray-100 text-gray-600')}>
+                            {dept}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">Position: {c.position || '—'}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-mono font-semibold text-amber-500">{fmt(waitSecs)}</p>
+                      <p className="text-2xs text-gray-400">waiting</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
