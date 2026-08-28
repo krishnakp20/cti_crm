@@ -19,7 +19,8 @@ import FormBuilderPage from './pages/forms/FormBuilderPage'
 import ClientsPage from './pages/admin/ClientsPage'
 import UsersPage from './pages/UsersPage'
 import CampaignsPage from './pages/calls/CampaignsPage'
-import CallLogsPage from './pages/calls/CallLogsPage'
+import CallLogsPage from './pages/CallLogsPage'
+import LiveDashboard from './pages/LiveDashboard'
 import AlertsPage from './pages/AlertsPage'
 import ReportsPage from './pages/ReportsPage'
 import AuditPage from './pages/AuditPage'
@@ -71,6 +72,7 @@ export default function App() {
         <Route path="/permissions" element={<PermissionsPage />} />
         <Route path="/campaigns" element={<CampaignsPage />} />
         <Route path="/call-logs" element={<CallLogsPage />} />
+        <Route path="/live" element={<LiveDashboard />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/audit" element={<AuditPage />} />

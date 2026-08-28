@@ -33,5 +33,11 @@ async def get_db():
 
 
 async def init_db():
+    # Import all models so metadata is populated before create_all
+    import app.models.user  # noqa
+    import app.models.client  # noqa
+    import app.models.call  # noqa
+    import app.models.ticket  # noqa
+    import app.models.cdr  # noqa
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

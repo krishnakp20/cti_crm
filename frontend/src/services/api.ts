@@ -152,3 +152,12 @@ export const teamsApi = {
   addMember: (teamId: number, userId: number) => api.post(`/teams/${teamId}/members`, { user_id: userId }),
   removeMember: (teamId: number, userId: number) => api.delete(`/teams/${teamId}/members/${userId}`),
 }
+
+export const cdrApi = {
+  list: (params?: any) => api.get('/cdr', { params }),
+  get: (id: number) => api.get(`/cdr/${id}`),
+  stats: (params?: any) => api.get('/cdr/stats', { params }),
+  liveState: () => api.get('/cdr/live'),
+  updateWrapup: (id: number, data: any) => api.patch(`/cdr/${id}/wrapup`, data),
+  recordingUrl: (id: number) => `/api/v1/cdr/${id}/recording`,
+}
