@@ -210,7 +210,7 @@ export default function UsersPage() {
                 </div>
               )}
               <div>
-                <label className="label">ViciDial Agent User ID</label>
+                <label className="label">Agent User ID</label>
                 <input {...register('dialer_user')} className="input" placeholder="e.g. 7231 (optional)" />
               </div>
               <div>
@@ -277,6 +277,7 @@ function DialerSettingsModal({ user, onClose, onSave, saving }: {
     const settings: any = {
       connection_type: connType,
       dialer_user: dialerUserId || null,
+      extension: extension || null,
       agent_mobile: connType === 'remote' ? (agentMobile || null) : null,
       sip_server_url: connType === 'webrtc' ? (sipServerUrl || null) : null,
     }
@@ -289,7 +290,7 @@ function DialerSettingsModal({ user, onClose, onSave, saving }: {
       <div className="card p-5 w-full max-w-md animate-fade-in max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white">Dialer Settings</h3>
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white">Agent Call Settings</h3>
             <p className="text-xs text-gray-500">{user.full_name} — {user.email}</p>
           </div>
           <button className="btn-icon" onClick={onClose}><X className="w-4 h-4" /></button>
@@ -297,13 +298,12 @@ function DialerSettingsModal({ user, onClose, onSave, saving }: {
 
         <div className="space-y-3">
           <div>
-            <label className="label">ViciDial Agent User ID</label>
+            <label className="label">Agent User ID</label>
             <input className="input" placeholder="e.g. 7231" value={dialerUserId} onChange={e => setDialerUserId(e.target.value)} />
-            <p className="text-2xs text-gray-400 mt-1">ViciDial Admin → Agents → Agent User column</p>
           </div>
           <div>
-            <label className="label">SIP Extension (ViciBox)</label>
-            <input className="input" placeholder="e.g. 8001" value={extension} onChange={e => setExtension(e.target.value)} />
+            <label className="label">SIP Extension</label>
+            <input className="input" placeholder="e.g. 2001" value={extension} onChange={e => setExtension(e.target.value)} />
           </div>
           <div>
             <label className="label">Connection Type</label>
@@ -317,7 +317,6 @@ function DialerSettingsModal({ user, onClose, onSave, saving }: {
             <div>
               <label className="label">Agent Mobile Number</label>
               <input className="input" placeholder="+91 9999999999" value={agentMobile} onChange={e => setAgentMobile(e.target.value)} />
-              <p className="text-2xs text-gray-400 mt-1">ViciDial will forward calls to this number.</p>
             </div>
           )}
 
@@ -326,14 +325,13 @@ function DialerSettingsModal({ user, onClose, onSave, saving }: {
               <div>
                 <label className="label">SIP Server URL</label>
                 <input className="input" placeholder="wss://192.168.10.30:8089/ws" value={sipServerUrl} onChange={e => setSipServerUrl(e.target.value)} />
-                <p className="text-2xs text-gray-400 mt-1">Asterisk WebSocket endpoint. Port 8089 is standard for ViciBox.</p>
               </div>
               <div>
                 <label className="label">SIP Password {sipPassword === '' && <span className="text-gray-400 font-normal">(leave blank to keep existing)</span>}</label>
-                <input type="password" className="input" placeholder="Asterisk SIP extension password" value={sipPassword} onChange={e => setSipPassword(e.target.value)} />
+                <input type="password" className="input" placeholder="SIP extension password" value={sipPassword} onChange={e => setSipPassword(e.target.value)} />
               </div>
               <div className="text-xs text-blue-700 bg-blue-50 rounded-lg p-3 dark:bg-blue-900/20 dark:text-blue-300">
-                Agent will use this browser as a softphone. Calls from ViciDial will ring in the browser — no mobile number needed.
+                Agent will use this browser as a softphone. Calls will ring in the browser — no mobile number needed.
               </div>
             </>
           )}

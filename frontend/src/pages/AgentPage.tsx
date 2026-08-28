@@ -849,8 +849,8 @@ export default function AgentPage() {
       {showExtModal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
           <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl p-6 w-96 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-1">Dialer Settings</h3>
-            <p className="text-xs text-gray-500 mb-4">Configure your connection to ViciDial.</p>
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-1">Connection Settings</h3>
+            <p className="text-xs text-gray-500 mb-4">Your call settings are configured by the administrator.</p>
 
             {/* Connection type indicator */}
             <div className={cn('flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium mb-4',
@@ -859,12 +859,8 @@ export default function AgentPage() {
               {connectionType === 'webrtc' ? 'WebRTC mode — calls handled in this browser' : 'Remote mode — calls forwarded to your phone'}
             </div>
 
-            <label className="label">SIP Extension (ViciBox)</label>
-            <input className="input w-full text-sm mb-3" placeholder="e.g. 8001" value={extension} onChange={e => setExtension(e.target.value)} autoFocus />
-
-            <label className="label">ViciDial Agent User ID</label>
-            <input className="input w-full text-sm mb-1" placeholder="e.g. 7231" value={dialerUser} onChange={e => setDialerUser(e.target.value)} />
-            <p className="text-2xs text-gray-400 mb-4">ViciDial Admin → Agents → Agent User column</p>
+            <label className="label">SIP Extension</label>
+            <input className="input w-full text-sm mb-3 bg-gray-50 cursor-not-allowed" value={extension} readOnly />
 
             {connectionType === 'remote' && (
               <>
@@ -875,13 +871,10 @@ export default function AgentPage() {
 
             {connectionType === 'webrtc' && (
               <>
-                <label className="label">SIP Server (WebSocket URL)</label>
-                <input className="input w-full text-sm mb-3" placeholder="wss://192.168.10.30:8089/ws" value={sipServerUrl} onChange={e => setSipServerUrl(e.target.value)} />
-                <label className="label">SIP Password</label>
-                <input type="password" className="input w-full text-sm mb-1" placeholder="Your SIP extension password" value={sipPassword} onChange={e => setSipPassword(e.target.value)} />
-                <p className="text-2xs text-gray-400 mb-4">Used to register your browser as a SIP phone with Asterisk.</p>
+                <label className="label">SIP Server</label>
+                <input className="input w-full text-sm mb-3 bg-gray-50 cursor-not-allowed" value={sipServerUrl} readOnly />
                 {sipStatus === 'failed' && (
-                  <p className="text-xs text-red-500 mb-3">Registration failed — check server URL, extension, and password.</p>
+                  <p className="text-xs text-red-500 mb-3">Registration failed — contact your administrator.</p>
                 )}
                 {sipStatus === 'registered' && (
                   <p className="text-xs text-green-600 mb-3">✓ Registered — browser is ready to receive calls.</p>
@@ -891,7 +884,9 @@ export default function AgentPage() {
 
             <div className="flex gap-2 justify-end">
               <button className="btn-secondary btn-sm" onClick={() => setShowExtModal(false)}>Cancel</button>
-              <button className="btn-primary btn-sm" onClick={saveExtension} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+              {connectionType === 'remote' && (
+                <button className="btn-primary btn-sm" onClick={saveExtension} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+              )}
             </div>
           </div>
         </div>
