@@ -21,6 +21,7 @@ import UsersPage from './pages/UsersPage'
 import CampaignsPage from './pages/calls/CampaignsPage'
 import CallLogsPage from './pages/CallLogsPage'
 import LiveDashboard from './pages/LiveDashboard'
+import IVRReportPage from './pages/IVRReportPage'
 import AlertsPage from './pages/AlertsPage'
 import ReportsPage from './pages/ReportsPage'
 import AuditPage from './pages/AuditPage'
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="/campaigns" element={<CampaignsPage />} />
         <Route path="/call-logs" element={<CallLogsPage />} />
         <Route path="/live" element={<LiveDashboard />} />
+        <Route path="/ivr-report" element={<IVRReportPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/audit" element={<AuditPage />} />
