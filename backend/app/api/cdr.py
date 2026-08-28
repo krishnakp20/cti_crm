@@ -147,41 +147,6 @@ async def cdr_stats(
     }
 
 
-@router.get("/{record_id}")
-async def get_record(
-    record_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    rec = await db.get(CallRecord, record_id)
-    if not rec:
-        raise HTTPException(404, "Record not found")
-    return _record_dict(rec)
-
-
-@router.patch("/{record_id}/wrapup")
-async def update_wrapup(
-    record_id: int,
-    body: dict,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Called by agent after wrap-up to attach disposition/tags/ticket."""
-    rec = await db.get(CallRecord, record_id)
-    if not rec:
-        raise HTTPException(404, "Record not found")
-    if body.get("disposition") is not None:
-        rec.disposition = body["disposition"]
-    if body.get("call_summary") is not None:
-        rec.call_summary = body["call_summary"]
-    if body.get("tags") is not None:
-        rec.tags = body["tags"]
-    if body.get("ticket_id") is not None:
-        rec.ticket_id = body["ticket_id"]
-    await db.commit()
-    return {"ok": True}
-
-
 @router.get("/export")
 async def export_cdr(
     department: Optional[str] = None,
@@ -270,6 +235,40 @@ async def export_cdr(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.get("/{record_id}")
+async def get_record(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rec = await db.get(CallRecord, record_id)
+    if not rec:
+        raise HTTPException(404, "Record not found")
+    return _record_dict(rec)
+
+
+@router.patch("/{record_id}/wrapup")
+async def update_wrapup(
+    record_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rec = await db.get(CallRecord, record_id)
+    if not rec:
+        raise HTTPException(404, "Record not found")
+    if body.get("disposition") is not None:
+        rec.disposition = body["disposition"]
+    if body.get("call_summary") is not None:
+        rec.call_summary = body["call_summary"]
+    if body.get("tags") is not None:
+        rec.tags = body["tags"]
+    if body.get("ticket_id") is not None:
+        rec.ticket_id = body["ticket_id"]
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/{record_id}/recording")
