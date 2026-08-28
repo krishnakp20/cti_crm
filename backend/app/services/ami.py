@@ -88,16 +88,8 @@ class AMIClient:
         # -- IVR direct-dial tracking (no queues) --
 
         if event == "Newchannel":
-            # Only track — do NOT create CDR here (QueueCallerJoin does that)
-            context = pkt.get("Context", "")
-            caller = pkt.get("CallerIDNum", "")
-            if context in ("from-vicidial", "ivr-main") and caller:
-                if uid not in self._queue_callers:
-                    self._queue_callers[uid] = {
-                        "caller": caller,
-                        "queue": "IVR",
-                        "time": datetime.now(timezone.utc),
-                    }
+            # Do nothing — QueueCallerJoin is the authoritative source for queue tracking
+            pass
 
         elif event == "DialBegin":
             # Caller is now ringing an agent
@@ -196,19 +188,20 @@ class AMIClient:
             })
 
         elif event == "AgentConnect":
-            # AgentName from queue is like "PJSIP/2001" — strip prefix for display
+            # AgentName from queue is like "PJSIP/2001" — strip prefix
             raw_agent = pkt.get("AgentName", "")
             agent_ext = raw_agent.replace("PJSIP/", "").replace("Local/", "").split("-")[0].split("@")[0]
             caller = pkt.get("CallerIDNum", "")
             queue = pkt.get("Queue", "")
             dept = _queue_to_dept(queue)
-            # Try to get caller from queue_callers if not in pkt
             entry = self._queue_callers.get(uid, {})
             if not caller and isinstance(entry, dict):
                 caller = entry.get("caller", "")
+            # Resolve agent full name from DB
+            agent_name = await self._resolve_agent_name(agent_ext) or agent_ext
             self._active_calls[uid] = {
                 "caller": caller,
-                "agent": agent_ext,
+                "agent": agent_name,
                 "agent_ext": agent_ext,
                 "department": dept,
                 "start": datetime.now(timezone.utc),
@@ -218,12 +211,12 @@ class AMIClient:
             await self._broadcast({
                 "type": "agent_connect",
                 "uniqueid": uid,
-                "agent": agent_ext,
+                "agent": agent_name,
                 "caller": caller,
                 "department": dept,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
-            await self._save_cdr_agent_connect(uid, pkt, {"agent_ext": agent_ext, "department": dept})
+            await self._save_cdr_agent_connect(uid, pkt, {"agent_ext": agent_ext, "agent_name": agent_name, "department": dept})
 
         elif event in ("AgentComplete", "AgentDump"):
             call = self._active_calls.pop(uid, {})
@@ -246,8 +239,18 @@ class AMIClient:
         await self._broadcast(pkt)
 
     # ------------------------------------------------------------------
-    # DB writes (imported lazily to avoid circular imports at startup)
+    # DB helpers
     # ------------------------------------------------------------------
+    async def _resolve_agent_name(self, ext: str) -> str:
+        try:
+            from app.models.user import User
+            from sqlalchemy import select
+            async with await self._db_session() as db:
+                user = (await db.execute(select(User).where(User.extension == ext))).scalar_one_or_none()
+                return user.full_name if user else ""
+        except Exception:
+            return ""
+
     async def _db_session(self):
         from app.core.database import AsyncSessionLocal
         return AsyncSessionLocal()
@@ -313,6 +316,8 @@ class AMIClient:
                 if user:
                     rec.agent_id = user.id
                     rec.agent_name = user.full_name
+                elif call.get("agent_name"):
+                    rec.agent_name = call["agent_name"]
                 await db.commit()
         except Exception as e:
             logger.warning("CDR agent_connect save error: %s", e)

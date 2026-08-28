@@ -1,9 +1,22 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useSelector } from 'react-redux'
+import { RootState } from '../redux/store'
 import { cdrApi } from '../services/api'
 import { useAdminClient } from '../hooks/useAdminClient'
 import { Phone, PhoneCall, PhoneOff, Clock, TrendingUp, Users, Download } from 'lucide-react'
 import { cn } from '../utils/cn'
+
+async function authDownload(url: string, filename: string, token: string | null) {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return
+  const blob = await res.blob()
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+}
 
 const DEPT_COLORS: Record<string, string> = {
   'General Enquiries':  '#3b82f6',
@@ -28,6 +41,7 @@ function pct(n: number, total: number) {
 
 export default function IVRReportPage() {
   const { clientFilter } = useAdminClient()
+  const token = useSelector((s: RootState) => s.auth.accessToken)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
@@ -90,10 +104,13 @@ export default function IVRReportPage() {
           <span className="text-xs text-gray-400">to</span>
           <input type="date" className="input text-sm w-auto" value={dateTo}
             onChange={e => setDateTo(e.target.value)} placeholder="To" />
-          <a href={exportUrl} download className="btn btn-secondary flex items-center gap-1.5 text-sm">
+          <button
+            className="btn btn-secondary flex items-center gap-1.5 text-sm"
+            onClick={() => authDownload(exportUrl, `ivr_report_${new Date().toISOString().slice(0,10)}.csv`, token)}
+          >
             <Download className="w-3.5 h-3.5" />
             Export CSV
-          </a>
+          </button>
         </div>
       </div>
 

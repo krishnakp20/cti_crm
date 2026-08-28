@@ -1,9 +1,38 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useSelector } from 'react-redux'
+import { RootState } from '../redux/store'
 import { cdrApi } from '../services/api'
 import { useAdminClient } from '../hooks/useAdminClient'
-import { Phone, PhoneCall, PhoneOff, Clock, Play, ChevronDown, ChevronUp, Loader2, Search, Download } from 'lucide-react'
+import { Phone, PhoneCall, PhoneOff, Clock, Play, Square, ChevronDown, ChevronUp, Loader2, Search, Download } from 'lucide-react'
 import { cn } from '../utils/cn'
+
+function useAuthDownload() {
+  const token = useSelector((s: RootState) => s.auth.accessToken)
+  return async (url: string, filename: string) => {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+  }
+}
+
+function useAuthAudio(id: number | null, token: string | null) {
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    if (!id || !token) { setSrc(null); return }
+    fetch(cdrApi.recordingUrl(id), { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.blob() : Promise.reject())
+      .then(blob => setSrc(URL.createObjectURL(blob)))
+      .catch(() => setSrc(null))
+    return () => { if (src) URL.revokeObjectURL(src) }
+  }, [id, token])
+  return src
+}
 
 const STATUS_BADGE: Record<string, string> = {
   completed:  'bg-green-100 text-green-700',
@@ -38,6 +67,8 @@ function fmtTime(d: string | null) {
 
 export default function CallLogsPage() {
   const { adminClientId, clientFilter } = useAdminClient()
+  const token = useSelector((s: RootState) => s.auth.accessToken)
+  const authDownload = useAuthDownload()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [department, setDepartment] = useState('')
@@ -46,6 +77,7 @@ export default function CallLogsPage() {
   const [dateTo, setDateTo] = useState('')
   const [expanded, setExpanded] = useState<number | null>(null)
   const [playing, setPlaying] = useState<number | null>(null)
+  const audioSrc = useAuthAudio(playing, token)
 
   const params = {
     page,
@@ -80,21 +112,23 @@ export default function CallLogsPage() {
           <h1 className="text-lg font-bold text-gray-900 dark:text-white">Call Logs</h1>
           <p className="text-xs text-gray-500">IVR call detail records with recordings and dispositions</p>
         </div>
-        <a
-          href={cdrApi.exportUrl({
-            ...(search && { search }),
-            ...(department && { department }),
-            ...(callStatus && { call_status: callStatus }),
-            ...(dateFrom && { date_from: dateFrom }),
-            ...(dateTo && { date_to: dateTo }),
-            ...clientFilter,
-          })}
+        <button
           className="btn btn-secondary flex items-center gap-1.5 text-sm"
-          download
+          onClick={() => authDownload(
+            cdrApi.exportUrl({
+              ...(search && { search }),
+              ...(department && { department }),
+              ...(callStatus && { call_status: callStatus }),
+              ...(dateFrom && { date_from: dateFrom }),
+              ...(dateTo && { date_to: dateTo }),
+              ...clientFilter,
+            }),
+            `call_logs_${new Date().toISOString().slice(0,10)}.csv`
+          )}
         >
           <Download className="w-3.5 h-3.5" />
           Export CSV
-        </a>
+        </button>
       </div>
 
       {/* Stats */}
@@ -204,9 +238,10 @@ export default function CallLogsPage() {
                 {/* Audio player */}
                 {playing === r.id && r.has_recording && (
                   <div className="px-4 py-2 bg-primary-50 dark:bg-primary-900/10 border-t border-primary-100">
-                    <audio controls autoPlay className="w-full h-8" src={cdrApi.recordingUrl(r.id)}>
-                      Your browser does not support audio playback.
-                    </audio>
+                    {audioSrc
+                      ? <audio controls autoPlay className="w-full h-8" src={audioSrc} />
+                      : <p className="text-xs text-gray-400 py-1">Loading recording…</p>
+                    }
                   </div>
                 )}
 
