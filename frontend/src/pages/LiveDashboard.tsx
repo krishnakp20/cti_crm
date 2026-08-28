@@ -10,7 +10,9 @@ interface ActiveCall {
   caller: string
   agent: string
   queue: string
+  department?: string
   duration: number
+  ringing?: boolean
 }
 
 interface QueueCaller {
@@ -79,6 +81,18 @@ export default function LiveDashboard() {
           })
         }
 
+        if (msg.type === 'agent_called') {
+          durationsRef.current[msg.uniqueid] = 0
+          setLive(prev => ({
+            ...prev,
+            queue_count: Math.max(0, prev.queue_count - 1),
+            active_calls: [
+              ...prev.active_calls.filter(c => c.uniqueid !== msg.uniqueid),
+              { uniqueid: msg.uniqueid, caller: msg.caller, agent: msg.agent, queue: msg.department || '', department: msg.department, duration: 0, ringing: true },
+            ],
+          }))
+        }
+
         if (msg.type === 'agent_connect') {
           durationsRef.current[msg.uniqueid] = 0
           setLive(prev => ({
@@ -86,7 +100,7 @@ export default function LiveDashboard() {
             queue_count: Math.max(0, prev.queue_count - 1),
             active_calls: [
               ...prev.active_calls.filter(c => c.uniqueid !== msg.uniqueid),
-              { uniqueid: msg.uniqueid, caller: msg.caller, agent: msg.agent, queue: msg.queue, duration: 0 },
+              { uniqueid: msg.uniqueid, caller: msg.caller, agent: msg.agent, queue: msg.department || msg.queue || '', department: msg.department, duration: 0, ringing: false },
             ],
           }))
         }
@@ -188,33 +202,42 @@ export default function LiveDashboard() {
           </div>
         ) : (
           <div className="divide-y divide-gray-50 dark:divide-gray-800">
-            {callsWithDuration.map(call => (
-              <div key={call.uniqueid} className="flex items-center gap-4 px-4 py-3">
-                {/* Animated pulse */}
-                <div className="relative flex-shrink-0">
-                  <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                  <div className="absolute inset-0 rounded-full bg-green-400 animate-ping opacity-75" />
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{call.caller || 'Unknown'}</p>
-                    {call.queue && (
-                      <span className={cn('px-2 py-0.5 rounded-full text-2xs font-medium',
-                        DEPT_COLORS[_queueToDept(call.queue)] || 'bg-gray-100 text-gray-600')}>
-                        {_queueToDept(call.queue)}
-                      </span>
-                    )}
+            {callsWithDuration.map(call => {
+              const dept = call.department || call.queue || ''
+              const isRinging = call.ringing
+              return (
+                <div key={call.uniqueid} className="flex items-center gap-4 px-4 py-3">
+                  {/* Animated pulse — amber if ringing, green if connected */}
+                  <div className="relative flex-shrink-0">
+                    <div className={cn('w-2.5 h-2.5 rounded-full', isRinging ? 'bg-amber-400' : 'bg-green-500')} />
+                    <div className={cn('absolute inset-0 rounded-full animate-ping opacity-75', isRinging ? 'bg-amber-300' : 'bg-green-400')} />
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5">Agent: {call.agent || '—'}</p>
-                </div>
 
-                <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-mono font-semibold text-green-600">{fmt(call.duration)}</p>
-                  <p className="text-2xs text-gray-400">duration</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{call.caller || 'Unknown'}</p>
+                      {dept && (
+                        <span className={cn('px-2 py-0.5 rounded-full text-2xs font-medium',
+                          DEPT_COLORS[dept] || 'bg-gray-100 text-gray-600')}>
+                          {dept}
+                        </span>
+                      )}
+                      {isRinging && (
+                        <span className="px-2 py-0.5 rounded-full text-2xs font-medium bg-amber-100 text-amber-700">
+                          Ringing…
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">Agent: {call.agent || '—'}</p>
+                  </div>
+
+                  <div className="text-right flex-shrink-0">
+                    <p className={cn('text-sm font-mono font-semibold', isRinging ? 'text-amber-500' : 'text-green-600')}>{fmt(call.duration)}</p>
+                    <p className="text-2xs text-gray-400">{isRinging ? 'ringing' : 'duration'}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
