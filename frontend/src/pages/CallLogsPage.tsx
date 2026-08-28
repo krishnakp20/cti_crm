@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { cdrApi } from '../services/api'
 import { useAdminClient } from '../hooks/useAdminClient'
-import { Phone, PhoneCall, PhoneOff, Clock, Play, FileText, ChevronDown, ChevronUp, Loader2, Search, Filter, Download } from 'lucide-react'
+import { Phone, PhoneCall, PhoneOff, Clock, Play, ChevronDown, ChevronUp, Loader2, Search, Download } from 'lucide-react'
 import { cn } from '../utils/cn'
 
 const STATUS_BADGE: Record<string, string> = {
@@ -80,6 +80,21 @@ export default function CallLogsPage() {
           <h1 className="text-lg font-bold text-gray-900 dark:text-white">Call Logs</h1>
           <p className="text-xs text-gray-500">IVR call detail records with recordings and dispositions</p>
         </div>
+        <a
+          href={cdrApi.exportUrl({
+            ...(search && { search }),
+            ...(department && { department }),
+            ...(callStatus && { call_status: callStatus }),
+            ...(dateFrom && { date_from: dateFrom }),
+            ...(dateTo && { date_to: dateTo }),
+            ...clientFilter,
+          })}
+          className="btn btn-secondary flex items-center gap-1.5 text-sm"
+          download
+        >
+          <Download className="w-3.5 h-3.5" />
+          Export CSV
+        </a>
       </div>
 
       {/* Stats */}

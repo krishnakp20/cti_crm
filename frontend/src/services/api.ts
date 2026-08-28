@@ -160,4 +160,9 @@ export const cdrApi = {
   liveState: () => api.get('/cdr/live'),
   updateWrapup: (id: number, data: any) => api.patch(`/cdr/${id}/wrapup`, data),
   recordingUrl: (id: number) => `/api/v1/cdr/${id}/recording`,
+  exportUrl: (params?: any) => {
+    const q = new URLSearchParams()
+    if (params) Object.entries(params).forEach(([k, v]) => v && q.set(k, String(v)))
+    return `/api/v1/cdr/export?${q.toString()}`
+  },
 }
