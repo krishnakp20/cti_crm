@@ -71,18 +71,50 @@ export default function UsersPage() {
   }
 
   const users = data?.items || []
+  const totalUsers = data?.total || 0
+  const maxUsers: number | null = data?.max_users ?? null
+  const limitReached = maxUsers !== null && totalUsers >= maxUsers
 
   return (
     <div className="space-y-3 max-w-6xl">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-gray-900 dark:text-white">Users</h1>
-          <p className="text-xs text-gray-500">{data?.total || 0} users{adminClientName ? ` — ${adminClientName}` : ''}</p>
+          <p className="text-xs text-gray-500">{totalUsers} users{adminClientName ? ` — ${adminClientName}` : ''}</p>
         </div>
-        <button className="btn-primary" onClick={() => setShowModal(true)}>
+        <button
+          className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => !limitReached && setShowModal(true)}
+          disabled={limitReached}
+          title={limitReached ? `User limit of ${maxUsers} reached. Contact admin to increase.` : undefined}
+        >
           <Plus className="w-3.5 h-3.5" /> Add User
         </button>
       </div>
+
+      {/* User limit usage bar */}
+      {maxUsers !== null && (
+        <div className="card p-3">
+          <div className="flex items-center justify-between text-xs mb-1.5">
+            <span className="text-gray-600 dark:text-gray-300 font-medium">User Limit</span>
+            <span className={cn('font-semibold', limitReached ? 'text-red-600' : 'text-gray-700 dark:text-gray-200')}>
+              {totalUsers} / {maxUsers} users
+            </span>
+          </div>
+          <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+            <div
+              className={cn('h-full rounded-full transition-all', limitReached ? 'bg-red-500' : totalUsers / maxUsers >= 0.8 ? 'bg-amber-400' : 'bg-green-500')}
+              style={{ width: `${Math.min(100, (totalUsers / maxUsers) * 100)}%` }}
+            />
+          </div>
+          {limitReached && (
+            <p className="text-xs text-red-600 mt-1.5">User limit reached. Contact your administrator to increase the limit.</p>
+          )}
+          {!limitReached && totalUsers / maxUsers >= 0.8 && (
+            <p className="text-xs text-amber-600 mt-1.5">{maxUsers - totalUsers} user slot{maxUsers - totalUsers !== 1 ? 's' : ''} remaining.</p>
+          )}
+        </div>
+      )}
       {adminClientId && (
         <div className="flex items-center gap-2 px-3 py-2 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg text-xs text-primary-700 dark:text-primary-300">
           <Building2 className="w-3.5 h-3.5 flex-shrink-0" />

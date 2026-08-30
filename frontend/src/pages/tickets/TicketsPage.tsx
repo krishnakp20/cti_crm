@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ticketsApi } from '../../services/api'
 import { Plus, Search, ChevronLeft, ChevronRight } from 'lucide-react'
+import { formatLabel } from '../../utils/cn'
 import { cn } from '../../utils/cn'
 import { format } from 'date-fns'
 import { useAdminClient } from '../../hooks/useAdminClient'
@@ -125,7 +126,7 @@ export default function TicketsPage() {
                       <span className={cn('text-xs capitalize', PRIORITY_COLORS[ticket.priority])}>{ticket.priority}</span>
                     </td>
                     <td className="td">
-                      <span className={`badge-${ticket.status}`}>{ticket.status?.replace('_', ' ')}</span>
+                      <span className={`badge-${ticket.status}`}>{formatLabel(ticket.status)}</span>
                     </td>
                     <td className="td text-xs text-gray-400 whitespace-nowrap">
                       {ticket.created_at ? format(new Date(ticket.created_at), 'MMM d, HH:mm') : '—'}
@@ -154,7 +155,7 @@ export default function TicketsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                       <span className="font-mono text-2xs text-primary-600">{ticket.ticket_number}</span>
-                      <span className={`badge-${ticket.status}`}>{ticket.status?.replace('_', ' ')}</span>
+                      <span className={`badge-${ticket.status}`}>{formatLabel(ticket.status)}</span>
                     </div>
                     <p className="text-xs font-medium text-gray-900 dark:text-white line-clamp-2">{ticket.subject}</p>
                     {ticket.customer_name && (

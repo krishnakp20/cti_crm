@@ -5,7 +5,7 @@ import api from '../../services/api'
 import { useAdminClient } from '../../hooks/useAdminClient'
 import { Download, Filter, FileSpreadsheet, Loader2, RefreshCw } from 'lucide-react'
 import { format } from 'date-fns'
-import { cn } from '../../utils/cn'
+import { cn, formatLabel } from '../../utils/cn'
 import toast from 'react-hot-toast'
 
 const STATUSES = ['', 'open', 'in_progress', 'pending', 'resolved', 'closed']
@@ -201,12 +201,12 @@ export default function TicketReportPage() {
                     <td className="px-3 py-2 text-gray-800 dark:text-gray-200 max-w-48 truncate" title={t.subject}>{t.subject}</td>
                     <td className="px-3 py-2">
                       <span className={cn('px-2 py-0.5 rounded-full text-2xs font-semibold capitalize', STATUS_COLORS[t.status] || 'bg-gray-100 text-gray-600')}>
-                        {(t.status || '').replace('_', ' ')}
+                        {formatLabel(t.status)}
                       </span>
                     </td>
                     <td className="px-3 py-2">
                       <span className={cn('px-2 py-0.5 rounded-full text-2xs font-semibold capitalize', PRIORITY_COLORS[t.priority] || '')}>
-                        {t.priority}
+                        {formatLabel(t.priority)}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{t.customer_name || '—'}</td>

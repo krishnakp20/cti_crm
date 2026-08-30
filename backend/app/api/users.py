@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.middleware.auth import get_current_user
 from app.core.security import get_password_hash
 from app.models.user import User, UserRole, Role, Permission, RolePermission, UserPermission
+from app.models.client import Client
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -137,10 +138,19 @@ async def list_users(
     result = await db.execute(q)
     users = result.scalars().all()
 
+    # Fetch user limit for client context
+    max_users = None
+    effective_client_id = client_id if current_user.role == UserRole.ADMIN and client_id else current_user.client_id
+    if effective_client_id:
+        client = await db.get(Client, effective_client_id)
+        if client:
+            max_users = client.max_users
+
     return {
         "total": total,
         "page": page,
         "limit": limit,
+        "max_users": max_users,
         "items": [
             {
                 "id": u.id,
@@ -172,9 +182,23 @@ async def create_user(req: UserCreateRequest, current_user: User = Depends(get_c
         raise HTTPException(status_code=400, detail="Email already exists")
 
     if current_user.role == UserRole.ADMIN:
-        client_id = req.client_id  # admin can assign to any client
+        client_id = req.client_id
     else:
         client_id = current_user.client_id
+
+    # Enforce max_users limit for clients
+    if client_id:
+        client = await db.get(Client, client_id)
+        if client and client.max_users is not None:
+            current_count = (await db.execute(
+                select(func.count()).where(User.client_id == client_id)
+            )).scalar() or 0
+            if current_count >= client.max_users:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"User limit reached. This account allows a maximum of {client.max_users} users. Contact your administrator to increase the limit."
+                )
+
     user = User(
         email=req.email,
         full_name=req.full_name,

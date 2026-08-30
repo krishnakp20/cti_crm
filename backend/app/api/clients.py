@@ -19,6 +19,7 @@ class ClientCreateRequest(BaseModel):
     admin_password: str
     mobile: Optional[str] = None
     max_agents: int = 10
+    max_users: int = 50
 
 
 class ClientUpdateRequest(BaseModel):
@@ -69,6 +70,7 @@ async def create_client(
         email=req.email,
         mobile=req.mobile,
         max_agents=req.max_agents,
+        max_users=req.max_users,
         status=ClientStatus.ACTIVE,
     )
     db.add(client)
@@ -123,6 +125,8 @@ async def list_clients(
                 "mobile": c.mobile,
                 "status": c.status,
                 "plan": c.plan,
+                "max_users": c.max_users,
+                "max_agents": c.max_agents,
                 "created_at": c.created_at,
             }
             for c in clients

@@ -4,7 +4,7 @@ import { reportsApi } from '../services/api'
 import { useAdminClient } from '../hooks/useAdminClient'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import { BarChart3, Download, Filter } from 'lucide-react'
-import { cn } from '../utils/cn'
+import { cn, formatLabel } from '../utils/cn'
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<'tickets' | 'calls' | 'agents'>('tickets')
@@ -93,8 +93,8 @@ export default function ReportsPage() {
                       <tr key={t.id}>
                         <td className="td font-mono text-xs text-primary-600">{t.ticket_number}</td>
                         <td className="td text-xs line-clamp-1">{t.subject}</td>
-                        <td className="td"><span className={`badge-${t.status}`}>{t.status}</span></td>
-                        <td className="td"><span className={`badge-${t.priority}`}>{t.priority}</span></td>
+                        <td className="td"><span className={`badge-${t.status}`}>{formatLabel(t.status)}</span></td>
+                        <td className="td"><span className={`badge-${t.priority}`}>{formatLabel(t.priority)}</span></td>
                         <td className="td text-xs text-gray-400">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}</td>
                       </tr>
                     ))}

@@ -7,10 +7,10 @@ import { RootState } from '../redux/store'
 import {
   Phone, Ticket, Calendar, PhoneCall, X, Settings,
   Wifi, WifiOff, FileText, Save, ExternalLink, AlertCircle, CheckCircle2,
-  Headphones, Radio,
+  Headphones, Radio, Mic, MicOff, ShieldAlert,
 } from 'lucide-react'
 import { format } from 'date-fns'
-import { cn } from '../utils/cn'
+import { cn, formatLabel } from '../utils/cn'
 import api from '../services/api'
 import toast from 'react-hot-toast'
 import JsSIP from 'jssip'
@@ -94,6 +94,46 @@ function useAgentWebSocket(token: string | null, onCallArrive: (call: IncomingCa
   }, [connect])
 
   return connected
+}
+
+// ── Microphone permission hook ────────────────────────────────────────────────
+type MicState = 'checking' | 'granted' | 'denied' | 'prompt' | 'unsupported'
+
+function useMicrophonePermission() {
+  const [micState, setMicState] = useState<MicState>('checking')
+
+  const check = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMicState('unsupported')
+      return
+    }
+    try {
+      if (navigator.permissions) {
+        const perm = await navigator.permissions.query({ name: 'microphone' as PermissionName })
+        setMicState(perm.state as MicState)
+        perm.onchange = () => setMicState(perm.state as MicState)
+        if (perm.state !== 'denied') return
+      }
+    } catch { /* permissions API not available */ }
+    // Fallback: just mark as prompt if we can't query
+    setMicState(prev => prev === 'checking' ? 'prompt' : prev)
+  }, [])
+
+  const request = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      stream.getTracks().forEach(t => t.stop())
+      setMicState('granted')
+    } catch (err: any) {
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setMicState('denied')
+      }
+    }
+  }, [])
+
+  useEffect(() => { check() }, [check])
+
+  return { micState, request }
 }
 
 // ── WebRTC Softphone hook ─────────────────────────────────────────────────────
@@ -428,6 +468,7 @@ export default function AgentPage() {
   }, [formValues, callSummary, callTags])
 
   const { status: sipStatus, hangup: sipHangup } = useWebRTCSoftphone(sipConfig, handleWebRTCIncoming, handleWebRTCEnded)
+  const { micState, request: requestMic } = useMicrophonePermission()
 
   const { data: tickets } = useQuery({
     queryKey: ['agent-tickets'],
@@ -541,8 +582,96 @@ export default function AgentPage() {
     setSaving(false)
   }
 
+  const micBlocked = micState === 'denied' || micState === 'unsupported'
+  const micPending = micState === 'prompt' || micState === 'checking'
+
   return (
     <div className="space-y-4 max-w-5xl">
+
+      {/* ── MICROPHONE DENIED BANNER ───────────────────────────────────────── */}
+      {(micBlocked || micPending) && micState !== 'checking' && (
+        <div className={cn(
+          'flex items-start gap-3 px-4 py-3 rounded-xl border text-sm',
+          micBlocked
+            ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+            : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+        )}>
+          <MicOff className={cn('w-5 h-5 mt-0.5 flex-shrink-0', micBlocked ? 'text-red-500' : 'text-amber-500')} />
+          <div className="flex-1 min-w-0">
+            {micBlocked ? (
+              <>
+                <p className="font-semibold text-red-700 dark:text-red-400">Microphone access is blocked</p>
+                <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">
+                  Incoming calls cannot be received without microphone access. To fix this, click the lock icon
+                  in your browser's address bar → <strong>Microphone</strong> → set to <strong>Allow</strong>,
+                  then reload the page.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-amber-700 dark:text-amber-400">Microphone permission required</p>
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                  You must allow microphone access to receive calls in this browser.
+                </p>
+              </>
+            )}
+          </div>
+          {micState === 'prompt' && (
+            <button
+              onClick={requestMic}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+            >
+              <Mic className="w-3.5 h-3.5" /> Enable Microphone
+            </button>
+          )}
+          {micBlocked && (
+            <button
+              onClick={() => window.location.reload()}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+            >
+              Reload after fixing
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── MIC BLOCKED INCOMING CALL OVERLAY ─────────────────────────────── */}
+      {activeCall && micBlocked && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md p-6 text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto">
+              <ShieldAlert className="w-8 h-8 text-red-600" />
+            </div>
+            <div>
+              <p className="text-base font-bold text-gray-900 dark:text-white">Microphone Blocked — Call Cannot Connect</p>
+              <p className="text-sm text-gray-500 mt-1">
+                An incoming call arrived from <span className="font-semibold">{activeCall.caller_id}</span>, but your microphone is blocked.
+                The caller will not hear you until microphone access is granted.
+              </p>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 text-left text-xs text-gray-600 dark:text-gray-400 space-y-1.5">
+              <p className="font-semibold text-gray-700 dark:text-gray-300">How to fix in Chrome / Edge:</p>
+              <p>1. Click the <strong>lock icon</strong> (🔒) in the address bar</p>
+              <p>2. Find <strong>Microphone</strong> → change to <strong>Allow</strong></p>
+              <p>3. Click <strong>Reload</strong> below</p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setActiveCall(null)}
+                className="flex-1 px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                Dismiss Call
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors"
+              >
+                Reload Page
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MANDATORY WRAP-UP GATE ─────────────────────────────────────────── */}
       {wrapup && (
@@ -636,6 +765,29 @@ export default function AgentPage() {
           {connectionType === 'webrtc' && (
             <SoftphoneBadge status={sipStatus} onHangup={sipHangup} />
           )}
+          {/* Microphone status pill */}
+          <button
+            onClick={micState === 'prompt' ? requestMic : undefined}
+            title={
+              micState === 'granted' ? 'Microphone enabled' :
+              micState === 'denied' ? 'Microphone blocked — click lock in address bar to fix' :
+              micState === 'prompt' ? 'Click to enable microphone' :
+              micState === 'unsupported' ? 'Microphone not supported' : 'Checking mic…'
+            }
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+              micState === 'granted' ? 'bg-green-100 text-green-700 cursor-default' :
+              micState === 'denied' || micState === 'unsupported' ? 'bg-red-100 text-red-700 cursor-default' :
+              micState === 'prompt' ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 cursor-pointer' :
+              'bg-gray-100 text-gray-500 cursor-default'
+            )}
+          >
+            {micState === 'granted' ? <Mic className="w-3 h-3" /> : <MicOff className="w-3 h-3" />}
+            {micState === 'granted' ? 'Mic On' :
+             micState === 'denied' ? 'Mic Blocked' :
+             micState === 'unsupported' ? 'No Mic' :
+             micState === 'prompt' ? 'Enable Mic' : 'Mic…'}
+          </button>
           <div className={cn('flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium',
             activeCall ? 'bg-red-100 text-red-700'
             : wrapup ? 'bg-amber-100 text-amber-700'
@@ -799,13 +951,13 @@ export default function AgentPage() {
                   <div className="flex items-center justify-between">
                     <span className="text-2xs font-mono text-primary-600">{t.ticket_number}</span>
                     <div className="flex items-center gap-1.5">
-                      <span className={`badge-${t.priority}`}>{t.priority}</span>
+                      <span className={`badge-${t.priority}`}>{formatLabel(t.priority)}</span>
                       <ExternalLink className="w-3 h-3 text-gray-300 group-hover:text-gray-500 transition-colors" />
                     </div>
                   </div>
                   <p className="text-xs text-gray-700 dark:text-gray-300 mt-0.5 truncate">{t.subject}</p>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className={`badge-${t.status}`}>{t.status?.replace('_', ' ')}</span>
+                    <span className={`badge-${t.status}`}>{formatLabel(t.status)}</span>
                     {t.customer_name && <span className="text-2xs text-gray-500">{t.customer_name}</span>}
                     {t.customer_mobile && <span className="text-2xs text-gray-400">{t.customer_mobile}</span>}
                   </div>
@@ -857,6 +1009,27 @@ export default function AgentPage() {
               connectionType === 'webrtc' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-600 border border-gray-200')}>
               {connectionType === 'webrtc' ? <Headphones className="w-3.5 h-3.5" /> : <Radio className="w-3.5 h-3.5" />}
               {connectionType === 'webrtc' ? 'WebRTC mode — calls handled in this browser' : 'Remote mode — calls forwarded to your phone'}
+            </div>
+
+            {/* Microphone status inside settings modal */}
+            <div className={cn(
+              'flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-medium mb-4 border',
+              micState === 'granted' ? 'bg-green-50 text-green-700 border-green-200' :
+              micState === 'denied' ? 'bg-red-50 text-red-700 border-red-200' :
+              'bg-amber-50 text-amber-700 border-amber-200'
+            )}>
+              {micState === 'granted' ? <Mic className="w-3.5 h-3.5 flex-shrink-0" /> : <MicOff className="w-3.5 h-3.5 flex-shrink-0" />}
+              <span className="flex-1">
+                {micState === 'granted' ? 'Microphone enabled — ready to receive calls' :
+                 micState === 'denied' ? 'Microphone blocked — click the lock in address bar → Allow' :
+                 micState === 'unsupported' ? 'Microphone not supported in this browser' :
+                 'Microphone permission not yet granted'}
+              </span>
+              {micState === 'prompt' && (
+                <button onClick={requestMic} className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-2xs font-semibold transition-colors">
+                  Enable
+                </button>
+              )}
             </div>
 
             <label className="label">SIP Extension</label>

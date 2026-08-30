@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { clientsApi } from '../../services/api'
 import { useForm } from 'react-hook-form'
-import { Building2, CheckCircle, XCircle, Search, Plus, X, Loader2 } from 'lucide-react'
+import { Building2, CheckCircle, XCircle, Search, Plus, X, Loader2, Users } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 import { cn } from '../../utils/cn'
@@ -19,6 +19,8 @@ export default function ClientsPage() {
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [showModal, setShowModal] = useState(false)
+  const [editLimitClient, setEditLimitClient] = useState<any>(null)
+  const [editMaxUsers, setEditMaxUsers] = useState('')
   const qc = useQueryClient()
   const { register, handleSubmit, reset, formState: { errors } } = useForm()
 
@@ -46,6 +48,17 @@ export default function ClientsPage() {
   const deactivateMutation = useMutation({
     mutationFn: (id: number) => clientsApi.deactivate(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['clients'] }); toast.success('Client deactivated') },
+  })
+
+  const updateLimitMutation = useMutation({
+    mutationFn: ({ id, max_users }: { id: number; max_users: number }) =>
+      clientsApi.update(id, { max_users }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['clients'] })
+      toast.success('User limit updated')
+      setEditLimitClient(null)
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || 'Failed to update limit'),
   })
 
   const clients = data?.items || []
@@ -83,6 +96,7 @@ export default function ClientsPage() {
                 <th className="th">Company</th>
                 <th className="th">Email</th>
                 <th className="th">Plan</th>
+                <th className="th">User Limit</th>
                 <th className="th">Status</th>
                 <th className="th">Registered</th>
                 <th className="th">Actions</th>
@@ -90,9 +104,9 @@ export default function ClientsPage() {
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
               {isLoading ? (
-                <tr><td colSpan={6} className="td text-center py-8 text-gray-400">Loading...</td></tr>
+                <tr><td colSpan={7} className="td text-center py-8 text-gray-400">Loading...</td></tr>
               ) : clients.length === 0 ? (
-                <tr><td colSpan={6} className="td text-center py-12 text-gray-400">No clients found</td></tr>
+                <tr><td colSpan={7} className="td text-center py-12 text-gray-400">No clients found</td></tr>
               ) : (
                 clients.map((client: any) => (
                   <tr key={client.id} className="table-row-hover">
@@ -109,6 +123,20 @@ export default function ClientsPage() {
                     </td>
                     <td className="td text-xs">{client.email}</td>
                     <td className="td"><span className="badge bg-indigo-100 text-indigo-700 capitalize">{client.plan}</span></td>
+                    <td className="td">
+                      <div className="flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-gray-400" />
+                        <span className="text-xs text-gray-700 dark:text-gray-300">
+                          {client.max_users ?? '∞'}
+                        </span>
+                        <button
+                          className="text-2xs text-primary-600 hover:underline ml-0.5"
+                          onClick={() => { setEditLimitClient(client); setEditMaxUsers(String(client.max_users ?? 50)) }}
+                        >
+                          edit
+                        </button>
+                      </div>
+                    </td>
                     <td className="td"><span className={STATUS_COLORS[client.status] || 'badge'}>{client.status}</span></td>
                     <td className="td text-xs text-gray-400">{client.created_at ? format(new Date(client.created_at), 'MMM d, yyyy') : '—'}</td>
                     <td className="td">
@@ -132,6 +160,45 @@ export default function ClientsPage() {
           </table>
         </div>
       </div>
+
+      {/* Edit User Limit Modal */}
+      {editLimitClient && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="card p-5 w-full max-w-sm animate-fade-in">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Edit User Limit</h3>
+                <p className="text-xs text-gray-400 mt-0.5">{editLimitClient.company_name}</p>
+              </div>
+              <button className="btn-icon" onClick={() => setEditLimitClient(null)}><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="label">Max Users</label>
+                <input
+                  type="number"
+                  className="input"
+                  value={editMaxUsers}
+                  onChange={e => setEditMaxUsers(e.target.value)}
+                  min={1}
+                  placeholder="50"
+                />
+                <p className="text-2xs text-gray-400 mt-0.5">Maximum number of users this client can create</p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button className="btn-secondary flex-1" onClick={() => setEditLimitClient(null)}>Cancel</button>
+                <button
+                  className="btn-primary flex-1"
+                  disabled={updateLimitMutation.isPending}
+                  onClick={() => updateLimitMutation.mutate({ id: editLimitClient.id, max_users: parseInt(editMaxUsers) || 50 })}
+                >
+                  {updateLimitMutation.isPending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : 'Save Limit'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Client Modal */}
       {showModal && (
@@ -160,6 +227,11 @@ export default function ClientsPage() {
                   <label className="label">Max Agents</label>
                   <input type="number" {...register('max_agents')} className="input" placeholder="10" defaultValue={10} />
                 </div>
+              </div>
+              <div>
+                <label className="label">Max Users (user creation limit)</label>
+                <input type="number" {...register('max_users')} className="input" placeholder="50" defaultValue={50} />
+                <p className="text-2xs text-gray-400 mt-0.5">Agents within this account cannot exceed this number of users</p>
               </div>
 
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-1">Client Admin Login</p>

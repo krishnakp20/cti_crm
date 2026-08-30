@@ -10,7 +10,7 @@ import {
   MessageSquare, Activity, FileText, ChevronDown, ChevronUp
 } from 'lucide-react'
 import { format } from 'date-fns'
-import { cn } from '../../utils/cn'
+import { cn, formatLabel } from '../../utils/cn'
 
 const STATUS_OPTIONS = ['open', 'in_progress', 'pending', 'resolved', 'closed']
 const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'critical']
@@ -105,8 +105,8 @@ export default function TicketDetailPage() {
             <span className="text-xs font-mono text-primary-600 bg-primary-50 dark:bg-primary-900/20 px-2 py-0.5 rounded">
               {ticket.ticket_number}
             </span>
-            <span className={`badge-${ticket.status}`}>{ticket.status?.replace('_', ' ')}</span>
-            <span className={`badge-${ticket.priority}`}>{ticket.priority}</span>
+            <span className={`badge-${ticket.status}`}>{formatLabel(ticket.status)}</span>
+            <span className={`badge-${ticket.priority}`}>{formatLabel(ticket.priority)}</span>
             {isOverdue && (
               <span className="flex items-center gap-1 text-xs text-red-600 font-medium">
                 <AlertTriangle className="w-3 h-3" /> SLA Breached
