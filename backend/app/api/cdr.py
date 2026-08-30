@@ -75,13 +75,22 @@ async def list_cdr(
 ):
     q = select(CallRecord).order_by(CallRecord.created_at.desc())
 
-    if current_user.role not in (UserRole.ADMIN,) and current_user.client_id:
-        q = q.where(CallRecord.client_id == current_user.client_id)
-    if client_id:
-        q = q.where(CallRecord.client_id == client_id)
+    # Scope by role
+    if current_user.role == UserRole.ADMIN:
+        if client_id:
+            q = q.where(CallRecord.client_id == client_id)
+    else:
+        # Client/Agent: always locked to own client
+        if current_user.client_id:
+            q = q.where(CallRecord.client_id == current_user.client_id)
+        # Agent: sees only their own calls
+        if current_user.role == UserRole.AGENT:
+            q = q.where(CallRecord.agent_id == current_user.id)
+
     if department:
         q = q.where(CallRecord.department == department)
-    if agent_id:
+    # Only non-agent roles can filter by a specific agent_id
+    if agent_id and current_user.role != UserRole.AGENT:
         q = q.where(CallRecord.agent_id == agent_id)
     if call_status:
         q = q.where(CallRecord.call_status == call_status)
@@ -116,10 +125,14 @@ async def cdr_stats(
     current_user: User = Depends(get_current_user),
 ):
     q = select(CallRecord)
-    if current_user.role not in (UserRole.ADMIN,) and current_user.client_id:
-        q = q.where(CallRecord.client_id == current_user.client_id)
-    if client_id:
-        q = q.where(CallRecord.client_id == client_id)
+    if current_user.role == UserRole.ADMIN:
+        if client_id:
+            q = q.where(CallRecord.client_id == client_id)
+    else:
+        if current_user.client_id:
+            q = q.where(CallRecord.client_id == current_user.client_id)
+        if current_user.role == UserRole.AGENT:
+            q = q.where(CallRecord.agent_id == current_user.id)
     if date_from:
         q = q.where(CallRecord.created_at >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
@@ -162,13 +175,17 @@ async def export_cdr(
     """Export call logs as CSV."""
     q = select(CallRecord).order_by(CallRecord.created_at.desc())
 
-    if current_user.role not in (UserRole.ADMIN,) and current_user.client_id:
-        q = q.where(CallRecord.client_id == current_user.client_id)
-    if client_id:
-        q = q.where(CallRecord.client_id == client_id)
+    if current_user.role == UserRole.ADMIN:
+        if client_id:
+            q = q.where(CallRecord.client_id == client_id)
+    else:
+        if current_user.client_id:
+            q = q.where(CallRecord.client_id == current_user.client_id)
+        if current_user.role == UserRole.AGENT:
+            q = q.where(CallRecord.agent_id == current_user.id)
     if department:
         q = q.where(CallRecord.department == department)
-    if agent_id:
+    if agent_id and current_user.role != UserRole.AGENT:
         q = q.where(CallRecord.agent_id == agent_id)
     if call_status:
         q = q.where(CallRecord.call_status == call_status)

@@ -8,41 +8,51 @@ from app.middleware.auth import get_current_user
 from app.models.user import User, UserRole
 from app.models.ticket import Ticket, TicketStatusEnum, TicketPriority
 from app.models.call import CallLog, Campaign
+from app.models.cdr import CallRecord
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 @router.get("/dashboard")
 async def dashboard_stats(
-    client_id: Optional[int] = None,  # admin can pass specific client_id
+    client_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # For non-admin, always scope to own client; for admin, use provided client_id (or all if None)
+    # Scope: admin uses provided client_id (or all); non-admin locked to own client
     if current_user.role != UserRole.ADMIN:
         client_id = current_user.client_id
-    # else: admin uses provided client_id or None (all)
 
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today - timedelta(days=today.weekday())
 
     def ticket_filter(*extra):
+        filters = list(extra)
         if client_id is not None:
-            return [Ticket.client_id == client_id, *extra]
-        return list(extra)
+            filters.insert(0, Ticket.client_id == client_id)
+        # Agent sees only own tickets
+        if current_user.role == UserRole.AGENT:
+            filters.append(Ticket.assigned_to == current_user.id)
+        return filters
 
-    def call_filter(*extra):
+    def cdr_filter(*extra):
+        filters = list(extra)
         if client_id is not None:
-            return [CallLog.client_id == client_id, *extra]
-        return list(extra)
+            filters.insert(0, CallRecord.client_id == client_id)
+        # Agent sees only own calls
+        if current_user.role == UserRole.AGENT:
+            filters.append(CallRecord.agent_id == current_user.id)
+        return filters
 
-    total_tickets = (await db.execute(select(func.count()).where(*ticket_filter()))).scalar()
-    open_tickets = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.status == TicketStatusEnum.OPEN)))).scalar()
+    total_tickets   = (await db.execute(select(func.count()).where(*ticket_filter()))).scalar()
+    open_tickets    = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.status == TicketStatusEnum.OPEN)))).scalar()
     pending_tickets = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.status == TicketStatusEnum.PENDING)))).scalar()
-    resolved_today = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.status == TicketStatusEnum.RESOLVED, Ticket.resolved_at >= today)))).scalar()
-    created_today = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.created_at >= today)))).scalar()
-    total_calls = (await db.execute(select(func.count()).where(*call_filter()))).scalar()
-    calls_today = (await db.execute(select(func.count()).where(*call_filter(CallLog.created_at >= today)))).scalar()
+    resolved_today  = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.status == TicketStatusEnum.RESOLVED, Ticket.resolved_at >= today)))).scalar()
+    created_today   = (await db.execute(select(func.count()).where(*ticket_filter(Ticket.created_at >= today)))).scalar()
+
+    # Use CDR (call_records) for call counts — CallLog is ViciBox-only
+    total_calls = (await db.execute(select(func.count(CallRecord.id)).where(*cdr_filter()))).scalar()
+    calls_today = (await db.execute(select(func.count(CallRecord.id)).where(*cdr_filter(CallRecord.created_at >= today)))).scalar()
 
     result = await db.execute(
         select(Ticket.status, func.count().label("count"))
@@ -98,7 +108,12 @@ async def ticket_report(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Ticket).where(Ticket.client_id == current_user.client_id)
+    q = select(Ticket)
+    if current_user.role != UserRole.ADMIN:
+        q = q.where(Ticket.client_id == current_user.client_id)
+    # Agent sees only their own tickets
+    if current_user.role == UserRole.AGENT:
+        q = q.where(Ticket.assigned_to == current_user.id)
     if from_date:
         q = q.where(Ticket.created_at >= from_date)
     if to_date:
@@ -121,23 +136,31 @@ async def call_report(
     from_date: Optional[datetime] = None,
     to_date: Optional[datetime] = None,
     agent_id: Optional[int] = None,
-    campaign_id: Optional[int] = None,
+    client_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(CallLog).where(CallLog.client_id == current_user.client_id)
-    if from_date:
-        q = q.where(CallLog.created_at >= from_date)
-    if to_date:
-        q = q.where(CallLog.created_at <= to_date)
-    if agent_id:
-        q = q.where(CallLog.agent_id == agent_id)
-    if campaign_id:
-        q = q.where(CallLog.campaign_id == campaign_id)
-    if current_user.role == UserRole.AGENT:
-        q = q.where(CallLog.agent_id == current_user.id)
+    """CDR-based call report (replaces ViciBox CallLog)."""
+    q = select(CallRecord).order_by(CallRecord.created_at.desc())
 
-    result = await db.execute(q.order_by(CallLog.created_at.desc()))
+    if current_user.role == UserRole.ADMIN:
+        if client_id:
+            q = q.where(CallRecord.client_id == client_id)
+    else:
+        q = q.where(CallRecord.client_id == current_user.client_id)
+
+    # Agent sees only their own calls
+    if current_user.role == UserRole.AGENT:
+        q = q.where(CallRecord.agent_id == current_user.id)
+    elif agent_id:
+        q = q.where(CallRecord.agent_id == agent_id)
+
+    if from_date:
+        q = q.where(CallRecord.created_at >= from_date)
+    if to_date:
+        q = q.where(CallRecord.created_at <= to_date)
+
+    result = await db.execute(q)
     return result.scalars().all()
 
 
@@ -153,8 +176,12 @@ async def agent_productivity(
         func.count().label("total_tickets"),
         func.sum(case((Ticket.status == TicketStatusEnum.RESOLVED, 1), else_=0)).label("resolved"),
         func.sum(case((Ticket.status == TicketStatusEnum.CLOSED, 1), else_=0)).label("closed"),
-    ).where(Ticket.client_id == current_user.client_id).group_by(Ticket.assigned_to)
+    ).group_by(Ticket.assigned_to)
 
+    if current_user.role != UserRole.ADMIN:
+        q = q.where(Ticket.client_id == current_user.client_id)
+    if current_user.role == UserRole.AGENT:
+        q = q.where(Ticket.assigned_to == current_user.id)
     if from_date:
         q = q.where(Ticket.created_at >= from_date)
     if to_date:
