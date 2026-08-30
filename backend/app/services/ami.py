@@ -278,10 +278,16 @@ class AMIClient:
     async def _save_cdr_queue_join(self, uid: str, pkt: dict):
         try:
             from app.models.cdr import CallRecord
+            from app.models.user import User
             from sqlalchemy import select
             async with await self._db_session() as db:
                 existing = (await db.execute(select(CallRecord).where(CallRecord.asterisk_unique_id == uid))).scalar_one_or_none()
                 if not existing:
+                    # Resolve client_id from any agent who has an extension (pick first active user)
+                    client_id = None
+                    any_user = (await db.execute(select(User).where(User.extension.isnot(None), User.client_id.isnot(None)).limit(1))).scalar_one_or_none()
+                    if any_user:
+                        client_id = any_user.client_id
                     db.add(CallRecord(
                         asterisk_unique_id=uid,
                         caller_number=pkt.get("CallerIDNum", ""),
@@ -289,6 +295,7 @@ class AMIClient:
                         department=_queue_to_dept(pkt.get("Queue", "")),
                         queue_start_time=datetime.now(timezone.utc),
                         call_status="queued",
+                        client_id=client_id,
                     ))
                     await db.commit()
         except Exception as e:
@@ -336,6 +343,9 @@ class AMIClient:
                 if user:
                     rec.agent_id = user.id
                     rec.agent_name = user.full_name
+                    # Set client_id so agents can see their own CDR records
+                    if not rec.client_id and user.client_id:
+                        rec.client_id = user.client_id
                 elif call.get("agent_name"):
                     rec.agent_name = call["agent_name"]
                 await db.commit()
