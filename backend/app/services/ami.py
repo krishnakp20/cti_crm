@@ -192,13 +192,15 @@ class AMIClient:
             raw_agent = pkt.get("AgentName", "")
             agent_ext = raw_agent.replace("PJSIP/", "").replace("Local/", "").split("-")[0].split("@")[0]
             caller = pkt.get("CallerIDNum", "")
+            caller_name = pkt.get("CallerIDName", "")
             queue = pkt.get("Queue", "")
             dept = _queue_to_dept(queue)
             entry = self._queue_callers.get(uid, {})
             if not caller and isinstance(entry, dict):
                 caller = entry.get("caller", "")
-            # Resolve agent full name from DB
-            agent_name = await self._resolve_agent_name(agent_ext) or agent_ext
+            # Resolve agent user from DB (need id + full_name)
+            agent_user = await self._resolve_agent_user(agent_ext)
+            agent_name = (agent_user["full_name"] if agent_user else None) or agent_ext
             self._active_calls[uid] = {
                 "caller": caller,
                 "agent": agent_name,
@@ -216,6 +218,17 @@ class AMIClient:
                 "department": dept,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
+            # Send call_arrive to the agent's browser so the Agent Panel pops up
+            if agent_user and agent_user.get("id"):
+                from app.websocket.manager import manager
+                await manager.send_to_user(agent_user["id"], {
+                    "type": "call_arrive",
+                    "uniqueid": uid,
+                    "caller_id": caller,
+                    "caller_name": caller_name,
+                    "department": dept,
+                    "queue": queue,
+                })
             await self._save_cdr_agent_connect(uid, pkt, {"agent_ext": agent_ext, "agent_name": agent_name, "department": dept})
 
         elif event in ("AgentComplete", "AgentDump"):
@@ -241,15 +254,22 @@ class AMIClient:
     # ------------------------------------------------------------------
     # DB helpers
     # ------------------------------------------------------------------
-    async def _resolve_agent_name(self, ext: str) -> str:
+    async def _resolve_agent_user(self, ext: str) -> dict:
+        """Return {'id': int, 'full_name': str} for an agent extension, or None."""
         try:
             from app.models.user import User
             from sqlalchemy import select
             async with await self._db_session() as db:
                 user = (await db.execute(select(User).where(User.extension == ext))).scalar_one_or_none()
-                return user.full_name if user else ""
+                if user:
+                    return {"id": user.id, "full_name": user.full_name}
         except Exception:
-            return ""
+            pass
+        return None
+
+    async def _resolve_agent_name(self, ext: str) -> str:
+        user = await self._resolve_agent_user(ext)
+        return user["full_name"] if user else ""
 
     async def _db_session(self):
         from app.core.database import AsyncSessionLocal
