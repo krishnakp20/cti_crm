@@ -39,5 +39,6 @@ async def init_db():
     import app.models.call  # noqa
     import app.models.ticket  # noqa
     import app.models.cdr  # noqa
+    import app.models.ivr  # noqa
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

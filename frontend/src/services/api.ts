@@ -153,6 +153,18 @@ export const teamsApi = {
   removeMember: (teamId: number, userId: number) => api.delete(`/teams/${teamId}/members/${userId}`),
 }
 
+export const ivrApi = {
+  listConfigs: (params?: any) => api.get('/ivr/configs', { params }),
+  createConfig: (data: any) => api.post('/ivr/configs', data),
+  updateConfig: (id: number, data: any) => api.put(`/ivr/configs/${id}`, data),
+  listRoutes: (configId: number) => api.get(`/ivr/configs/${configId}/routes`),
+  addRoute: (configId: number, data: any) => api.post(`/ivr/configs/${configId}/routes`, data),
+  updateRoute: (routeId: number, data: any) => api.put(`/ivr/routes/${routeId}`, data),
+  deleteRoute: (routeId: number) => api.delete(`/ivr/routes/${routeId}`),
+  setOverride: (routeId: number, data: any) => api.put(`/ivr/routes/${routeId}/override`, data),
+  clearOverride: (routeId: number) => api.delete(`/ivr/routes/${routeId}/override`),
+}
+
 export const cdrApi = {
   list: (params?: any) => api.get('/cdr', { params }),
   get: (id: number) => api.get(`/cdr/${id}`),

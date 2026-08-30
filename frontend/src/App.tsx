@@ -29,6 +29,7 @@ import AgentPage from './pages/AgentPage'
 import SettingsPage from './pages/SettingsPage'
 import PermissionsPage from './pages/PermissionsPage'
 import TeamsPage from './pages/TeamsPage'
+import IVRRoutingPage from './pages/IVRRoutingPage'
 import NotFoundPage from './pages/NotFoundPage'
 
 
@@ -75,6 +76,7 @@ export default function App() {
         <Route path="/call-logs" element={<CallLogsPage />} />
         <Route path="/live" element={<LiveDashboard />} />
         <Route path="/ivr-report" element={<IVRReportPage />} />
+        <Route path="/ivr-routing" element={<IVRRoutingPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/audit" element={<AuditPage />} />

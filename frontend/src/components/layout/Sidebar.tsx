@@ -7,7 +7,7 @@ import { cn } from '../../utils/cn'
 import {
   LayoutDashboard, Ticket, FileText, Users, Building2, Phone,
   Bell, BarChart3, Shield, Settings, LogOut, ChevronLeft, ChevronRight,
-  Headphones, Megaphone, KeyRound, X, Radio, PhoneCall,
+  Headphones, Megaphone, KeyRound, X, Radio, PhoneCall, GitBranch,
 } from 'lucide-react'
 
 const navGroups = [
@@ -26,6 +26,7 @@ const navGroups = [
       { to: '/live', icon: Radio, label: 'Live Dashboard' },
       { to: '/call-logs', icon: Phone, label: 'Call Logs' },
       { to: '/ivr-report', icon: PhoneCall, label: 'IVR Report' },
+      { to: '/ivr-routing', icon: GitBranch, label: 'IVR Routing', roles: ['admin', 'client'] },
       { to: '/agent', icon: Headphones, label: 'Agent Panel', roles: ['agent'] },
     ],
   },
@@ -77,6 +78,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
     Campaigns:              'campaign',
     'Call Logs':            'calling',
     'IVR Report':           'calling',
+    'IVR Routing':          'calling',
     'Agent Panel':          'calling',
     'Form Builder':         'form',
     'Alerts & Escalations': 'alert',
