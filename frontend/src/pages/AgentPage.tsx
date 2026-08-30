@@ -480,7 +480,15 @@ export default function AgentPage() {
   })
   const { data: callLogs } = useQuery({
     queryKey: ['agent-calls'],
-    queryFn: () => callsApi.listLogs({ limit: 10 }).then(r => r.data),
+    queryFn: () => callsApi.listLogs({ limit: 10 }).then(r => r.data).catch(() => ({ total: 0 })),
+  })
+
+  // Today's CDR count for this agent
+  const today = new Date().toISOString().slice(0, 10)
+  const { data: todayCdr } = useQuery({
+    queryKey: ['agent-cdr-today'],
+    queryFn: () => api.get('/cdr', { params: { date_from: today, date_to: today, limit: 1 } }).then(r => r.data),
+    refetchInterval: 30000,
   })
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
@@ -806,7 +814,7 @@ export default function AgentPage() {
         {[
           { label: 'Open Tickets',    value: openTickets,          icon: Ticket,   color: 'text-primary-600 bg-primary-50' },
           { label: 'Today Callbacks', value: todayCallbacks,       icon: Calendar, color: 'text-orange-600 bg-orange-50' },
-          { label: 'Calls Today',     value: callLogs?.total || 0, icon: Phone,    color: 'text-blue-600 bg-blue-50' },
+          { label: 'Calls Today',     value: todayCdr?.total || 0, icon: Phone,    color: 'text-blue-600 bg-blue-50' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="card p-3 flex items-center gap-3">
             <div className={cn('p-2 rounded-lg', color)}><Icon className="w-4 h-4" /></div>
