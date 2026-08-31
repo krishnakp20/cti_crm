@@ -50,11 +50,11 @@ export default function IVRRoutingPage() {
   // Fetch configs
   const { data: configs = [], isLoading: loadingConfigs } = useQuery({
     queryKey: ['ivr-configs'],
-    queryFn: () => ivrApi.listConfigs().then(r => r.data),
+    queryFn: () => ivrApi.listConfigs().then(r => Array.isArray(r.data) ? r.data : []),
   })
 
-  // Auto-select first config
-  const activeConfigId = selectedConfig ?? (configs[0]?.id ?? null)
+  // Auto-select first config once loaded
+  const activeConfigId: number | null = selectedConfig ?? (configs.length > 0 ? configs[0].id : null)
 
   // Fetch routes for selected config
   const { data: routes = [], isLoading: loadingRoutes } = useQuery({
