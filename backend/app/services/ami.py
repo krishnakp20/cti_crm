@@ -206,6 +206,7 @@ class AMIClient:
                 "agent": agent_name,
                 "agent_ext": agent_ext,
                 "department": dept,
+                "queue": queue,
                 "start": datetime.now(timezone.utc),
                 "answered": True,
             }
@@ -434,9 +435,10 @@ class AMIClient:
                 {
                     "uniqueid": uid,
                     "caller": v["caller"],
-                    "agent": v.get("agent", ""),
+                    "agent": v.get("agent") or v.get("agent_ext", ""),
+                    "agent_ext": v.get("agent_ext", ""),
                     "department": v.get("department", ""),
-                    "queue": v.get("department", ""),
+                    "queue": v.get("queue", v.get("department", "")),
                     "duration": int((now - v["start"]).total_seconds()),
                 }
                 for uid, v in self._active_calls.items()
@@ -448,12 +450,18 @@ class AMIClient:
 
 def _queue_to_dept(queue: str) -> str:
     mapping = {
+        "q-general": "General Enquiries",
+        "q-sales-day": "Sales & Marketing",
+        "q-sales-eve": "Sales & Marketing",
+        "q-support-day": "Customer Service",
+        "q-support-eve": "Customer Service",
+        "q-accounts": "Accounts & Finance",
+        "q-hr": "HR",
+        "q-operator": "Speak with Operator",
+        # legacy names
         "q-reception": "General Enquiries",
         "q-sales": "Sales & Marketing",
         "q-support": "Customer Service",
-        "q-accounts": "Accounts & Finance",
-        "q-hr": "HR",
-        "q-logistics": "Logistics",
     }
     return mapping.get(queue, queue)
 
