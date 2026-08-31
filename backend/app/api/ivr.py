@@ -267,6 +267,10 @@ async def set_override(
     for ov in existing:
         ov.is_active = False
 
+    # Resolve extensions for AMI queue manipulation
+    primary_user = await db.get(User, route.primary_agent_id) if route.primary_agent_id else None
+    override_user = await db.get(User, body.override_agent_id)
+
     ov = IVRRouteOverride(
         ivr_route_id=route_id,
         override_agent_id=body.override_agent_id,
@@ -276,6 +280,31 @@ async def set_override(
     )
     db.add(ov)
     await db.commit()
+
+    # Update Asterisk queue membership if queue_name is configured
+    if route.queue_name and primary_user and override_user:
+        try:
+            from app.services.ami import ami_client
+            q = route.queue_name
+            # Pause primary agent in queue
+            await ami_client.send_action({
+                "Action": "QueuePause",
+                "Queue": q,
+                "Interface": f"PJSIP/{primary_user.extension}",
+                "Paused": "true",
+                "Reason": body.reason or "Override active",
+            })
+            # Add override agent to queue (penalty 1 = highest priority)
+            await ami_client.send_action({
+                "Action": "QueueAdd",
+                "Queue": q,
+                "Interface": f"PJSIP/{override_user.extension}",
+                "Penalty": "1",
+                "MemberName": override_user.full_name,
+            })
+        except Exception as e:
+            pass  # AMI errors don't block the override save
+
     return {"ok": True}
 
 
@@ -287,14 +316,42 @@ async def clear_override(
 ):
     if current_user.role not in (UserRole.ADMIN, UserRole.CLIENT):
         raise HTTPException(403)
+
     rows = (await db.execute(
         select(IVRRouteOverride).where(
             IVRRouteOverride.ivr_route_id == route_id,
             IVRRouteOverride.is_active == True,
         )
     )).scalars().all()
+
     for ov in rows:
+        # Restore Asterisk queue membership
+        route = await db.get(IVRRoute, ov.ivr_route_id)
+        if route and route.queue_name:
+            primary_user = await db.get(User, route.primary_agent_id) if route.primary_agent_id else None
+            override_user = await db.get(User, ov.override_agent_id)
+            try:
+                from app.services.ami import ami_client
+                q = route.queue_name
+                # Remove override agent from queue
+                if override_user:
+                    await ami_client.send_action({
+                        "Action": "QueueRemove",
+                        "Queue": q,
+                        "Interface": f"PJSIP/{override_user.extension}",
+                    })
+                # Unpause primary agent
+                if primary_user:
+                    await ami_client.send_action({
+                        "Action": "QueuePause",
+                        "Queue": q,
+                        "Interface": f"PJSIP/{primary_user.extension}",
+                        "Paused": "false",
+                    })
+            except Exception:
+                pass
         ov.is_active = False
+
     await db.commit()
     return {"ok": True}
 

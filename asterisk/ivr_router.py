@@ -135,19 +135,8 @@ def main():
     set_variable("IVR_DEPARTMENT", department)
     set_variable("IVR_SELECTION", press_key)
 
-    # Override: dial replacement agent directly (bypasses queue)
-    if override_active and override_ext:
-        verbose(f"ivr_router: override active — dialing {override_ext}")
-        agi_send(f'EXEC Dial "PJSIP/{override_ext},{ring_timeout},tr"')
-        dial_status = get_variable("DIALSTATUS")
-        if dial_status == "ANSWER":
-            hangup()
-            return
-        agi_send('EXEC Playback "vm-nobodyavail"')
-        hangup()
-        return
-
     # Normal routing: use Queue if configured (handles queueing + backup via members)
+    # Override agent is added to queue dynamically via AMI — queue handles waiting
     if queue_name:
         verbose(f"ivr_router: routing to queue={queue_name}")
         agi_send(f'EXEC Queue "{queue_name},tr,,{ring_timeout},{ring_timeout}"')

@@ -406,6 +406,15 @@ class AMIClient:
         except Exception as e:
             logger.warning("CDR recording save error: %s", e)
 
+    async def send_action(self, action: dict):
+        """Send an AMI action dict and return immediately (fire-and-forget)."""
+        if not self._connected or not self.writer:
+            logger.warning("AMI not connected — cannot send action %s", action.get("Action"))
+            return
+        lines = "".join(f"{k}: {v}\r\n" for k, v in action.items()) + "\r\n"
+        self.writer.write(lines.encode())
+        await self.writer.drain()
+
     def get_live_state(self) -> dict:
         """Return current active calls and queue for dashboard."""
         now = datetime.now(timezone.utc)
