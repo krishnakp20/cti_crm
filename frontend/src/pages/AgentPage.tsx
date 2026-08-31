@@ -347,6 +347,7 @@ export default function AgentPage() {
   const navigate = useNavigate()
 
   const [activeCall, setActiveCall] = useState<IncomingCall | null>(null)
+  const agentEndedCallRef = useRef(false)  // true when agent clicked End Call — suppress duplicate wrap-up from JsSIP ended event
   const [callTimer, setCallTimer] = useState(0)
   const [formValues, setFormValues] = useState<Record<string, any>>({})
   const [callTags, setCallTags] = useState<string[]>([])
@@ -454,7 +455,12 @@ export default function AgentPage() {
   }, [handleCallArrive])
 
   const handleWebRTCEnded = useCallback(() => {
-    // If call ends from remote side without agent ending it, trigger wrap-up
+    // Skip if agent already handled wrap-up via End Call button
+    if (agentEndedCallRef.current) {
+      agentEndedCallRef.current = false
+      return
+    }
+    // Call ended from remote side — trigger wrap-up
     setActiveCall(prev => {
       if (prev) {
         setWrapup({ call: prev, formValues })
@@ -557,6 +563,8 @@ export default function AgentPage() {
   // End call → hang up SIP session, then enter wrap-up gate
   const endCall = () => {
     if (!activeCall) return
+    // Flag so handleWebRTCEnded knows the agent triggered this, not the remote side
+    agentEndedCallRef.current = true
     // Terminate WebRTC session if active
     sipHangup()
     // Always enter wrap-up (agent must submit disposition before becoming available)
