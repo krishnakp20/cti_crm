@@ -180,11 +180,15 @@ export default function IVRRoutingPage() {
               <Plus className="w-3.5 h-3.5 mr-1" /> New Config
             </button>
           )}
-          {activeConfigId && (
-            <button className="btn btn-primary text-xs" onClick={openAddRoute} disabled={!activeConfigId}>
-              <Plus className="w-3.5 h-3.5 mr-1" /> Add Route
-            </button>
-          )}
+          <button
+            className="btn btn-primary text-xs"
+            onClick={() => {
+              if (!activeConfigId) { toast.error('No IVR config found. Create one first or ask admin.'); return }
+              openAddRoute()
+            }}
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" /> Add Route
+          </button>
         </div>
       </div>
 
