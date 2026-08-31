@@ -123,7 +123,7 @@ async def export_tickets(
         writer.writerow(row)
 
     output.seek(0)
-    filename = f"tickets_export_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+    filename = f"tickets_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
@@ -227,7 +227,7 @@ async def create_ticket(
 
         # 2. Fallback: find recent unlinked record for same caller + agent (WebRTC calls)
         if not existing_cr and ticket.customer_mobile:
-            cutoff = datetime.utcnow().replace(tzinfo=None) - __import__('datetime').timedelta(minutes=30)
+            cutoff = datetime.now().replace(tzinfo=None) - __import__('datetime').timedelta(minutes=30)
             existing_cr = (await db.execute(
                 select(CallRecord).where(
                     and_(
@@ -258,7 +258,7 @@ async def create_ticket(
                 agent_id=current_user.id,
                 agent_name=current_user.full_name,
                 call_status='answered',
-                call_start_time=datetime.utcnow(),
+                call_start_time=datetime.now(),
                 ticket_id=ticket.id,
                 disposition=disposition,
                 call_summary=fd.get('call_summary'),
@@ -305,9 +305,9 @@ async def update_ticket(
     old_status = ticket.status
 
     if data.get("status") == TicketStatusEnum.RESOLVED and not ticket.resolved_at:
-        data["resolved_at"] = datetime.utcnow()
+        data["resolved_at"] = datetime.now()
     if data.get("status") == TicketStatusEnum.CLOSED and not ticket.closed_at:
-        data["closed_at"] = datetime.utcnow()
+        data["closed_at"] = datetime.now()
     if data.get("status") == TicketStatusEnum.REOPENED:
         data["reopened_count"] = ticket.reopened_count + 1
 
@@ -346,7 +346,7 @@ async def add_comment(
     if not (await db.execute(select(Ticket).where(Ticket.id == ticket_id, Ticket.first_response_at == None))).scalar_one_or_none():
         pass
     else:
-        await db.execute(update(Ticket).where(Ticket.id == ticket_id, Ticket.first_response_at == None).values(first_response_at=datetime.utcnow()))
+        await db.execute(update(Ticket).where(Ticket.id == ticket_id, Ticket.first_response_at == None).values(first_response_at=datetime.now()))
 
     await db.commit()
     await db.refresh(comment)
@@ -367,7 +367,7 @@ async def get_logs(ticket_id: int, current_user: User = Depends(get_current_user
 
 @router.post("/{ticket_id}/close")
 async def close_ticket(ticket_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    await db.execute(update(Ticket).where(Ticket.id == ticket_id).values(status=TicketStatusEnum.CLOSED, closed_at=datetime.utcnow()))
+    await db.execute(update(Ticket).where(Ticket.id == ticket_id).values(status=TicketStatusEnum.CLOSED, closed_at=datetime.now()))
     db.add(TicketLog(ticket_id=ticket_id, user_id=current_user.id, action="closed", new_value="closed"))
     await db.commit()
     return {"message": "Ticket closed"}

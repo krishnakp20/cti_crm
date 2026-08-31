@@ -73,7 +73,7 @@ export default function CallLogsPage() {
                       <td className="td text-xs text-gray-500">{formatDuration(log.duration)}</td>
                       <td className="td text-xs text-gray-500">{log.disposition || '—'}</td>
                       <td className="td text-xs text-gray-500">{log.agent_id || '—'}</td>
-                      <td className="td text-xs text-gray-400">{log.created_at ? format(new Date(log.created_at.endsWith('Z') || log.created_at.includes('+') ? log.created_at : log.created_at.replace(' ', 'T') + 'Z'), 'MMM d, HH:mm') : '—'}</td>
+                      <td className="td text-xs text-gray-400">{log.created_at ? format(new Date(log.created_at), 'MMM d, HH:mm') : '—'}</td>
                       <td className="td">
                         {log.recording_url ? (
                           <a href={log.recording_url} target="_blank" rel="noopener noreferrer" className="text-2xs text-primary-600 hover:underline">Play</a>

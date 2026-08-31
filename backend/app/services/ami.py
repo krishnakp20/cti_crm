@@ -105,7 +105,7 @@ class AMIClient:
                 "agent_ext": agent_ext,
                 "agent": agent_ext,
                 "department": dept,
-                "start": datetime.now(timezone.utc),
+                "start": datetime.now(),
                 "answered": False,
             }
             await self._broadcast({
@@ -114,14 +114,14 @@ class AMIClient:
                 "agent": agent_ext,
                 "caller": caller,
                 "department": dept,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now().isoformat(),
             })
 
         elif event == "DialEnd":
             call = self._active_calls.get(uid)
             if call and pkt.get("DialStatus") == "ANSWER":
                 call["answered"] = True
-                call["answer_time"] = datetime.now(timezone.utc)
+                call["answer_time"] = datetime.now()
                 entry = self._queue_callers.get(uid)
                 if entry and isinstance(entry, dict):
                     call["queue_duration"] = int(
@@ -143,7 +143,7 @@ class AMIClient:
             if call:
                 if call.get("answered"):
                     answer_time = call.get("answer_time", call["start"])
-                    duration = int((datetime.now(timezone.utc) - answer_time).total_seconds())
+                    duration = int((datetime.now() - answer_time).total_seconds())
                     await self._broadcast({
                         "type": "agent_complete",
                         "uniqueid": uid,
@@ -166,7 +166,7 @@ class AMIClient:
                 "queue": queue,
                 "department": _queue_to_dept(queue),
                 "position": pkt.get("Position", "1"),
-                "time": datetime.now(timezone.utc),
+                "time": datetime.now(),
             }
             await self._broadcast({
                 "type": "queue_join",
@@ -175,7 +175,7 @@ class AMIClient:
                 "queue": queue,
                 "department": _queue_to_dept(queue),
                 "position": pkt.get("Position", ""),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now().isoformat(),
             })
             await self._save_cdr_queue_join(uid, pkt)
 
@@ -207,7 +207,7 @@ class AMIClient:
                 "agent_ext": agent_ext,
                 "department": dept,
                 "queue": queue,
-                "start": datetime.now(timezone.utc),
+                "start": datetime.now(),
                 "answered": True,
             }
             self._queue_callers.pop(uid, None)
@@ -217,7 +217,7 @@ class AMIClient:
                 "agent": agent_name,
                 "caller": caller,
                 "department": dept,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now().isoformat(),
             })
             # Send call_arrive to the agent's browser so the Agent Panel pops up
             if agent_user and agent_user.get("id"):
@@ -294,7 +294,7 @@ class AMIClient:
                         caller_number=pkt.get("CallerIDNum", ""),
                         queue_name=pkt.get("Queue", ""),
                         department=_queue_to_dept(pkt.get("Queue", "")),
-                        queue_start_time=datetime.now(timezone.utc),
+                        queue_start_time=datetime.now(),
                         call_status="queued",
                         client_id=client_id,
                     ))
@@ -316,7 +316,7 @@ class AMIClient:
                     )
                     db.add(rec)
 
-                now = datetime.now(timezone.utc)
+                now = datetime.now()
                 # Support both queue AgentConnect and direct DialEnd
                 agent_ext = (
                     call.get("agent_ext")
@@ -360,7 +360,7 @@ class AMIClient:
             async with await self._db_session() as db:
                 rec = (await db.execute(select(CallRecord).where(CallRecord.asterisk_unique_id == uid))).scalar_one_or_none()
                 if rec:
-                    rec.call_end_time = datetime.now(timezone.utc)
+                    rec.call_end_time = datetime.now()
                     rec.call_duration = duration
                     rec.call_status = "completed"
                     await db.commit()
@@ -374,7 +374,7 @@ class AMIClient:
             async with await self._db_session() as db:
                 rec = (await db.execute(select(CallRecord).where(CallRecord.asterisk_unique_id == uid))).scalar_one_or_none()
                 if rec:
-                    rec.call_end_time = datetime.now(timezone.utc)
+                    rec.call_end_time = datetime.now()
                     rec.call_duration = int(pkt.get("TalkTime", 0))
                     rec.call_status = "completed"
                     await db.commit()
@@ -388,7 +388,7 @@ class AMIClient:
             async with await self._db_session() as db:
                 rec = (await db.execute(select(CallRecord).where(CallRecord.asterisk_unique_id == uid))).scalar_one_or_none()
                 if rec:
-                    rec.call_end_time = datetime.now(timezone.utc)
+                    rec.call_end_time = datetime.now()
                     rec.call_status = "abandoned"
                     await db.commit()
         except Exception as e:
@@ -418,7 +418,7 @@ class AMIClient:
 
     def get_live_state(self) -> dict:
         """Return current active calls and queue for dashboard."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
         queue_callers = []
         for uid, v in self._queue_callers.items():
             if isinstance(v, dict):
