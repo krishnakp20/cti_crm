@@ -62,7 +62,9 @@ function fmt(s: number | null) {
 
 function fmtTime(d: string | null) {
   if (!d) return '—'
-  return new Date(d).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
+  // Ensure UTC parsing — append Z if no timezone info present
+  const utc = d.endsWith('Z') || d.includes('+') ? d : d.replace(' ', 'T') + 'Z'
+  return new Date(utc).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
 }
 
 export default function CallLogsPage() {
