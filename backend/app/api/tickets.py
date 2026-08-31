@@ -244,7 +244,7 @@ async def create_ticket(
                 agent_id=current_user.id,
                 agent_name=current_user.full_name,
                 call_status='answered',
-                call_start_time=ticket.created_at,
+                call_start_time=datetime.utcnow(),
                 ticket_id=ticket.id,
                 disposition=disposition,
                 call_summary=fd.get('call_summary'),
