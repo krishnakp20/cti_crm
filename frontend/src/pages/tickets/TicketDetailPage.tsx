@@ -289,9 +289,10 @@ export default function TicketDetailPage() {
                 onChange={e => updateMutation.mutate({ status: e.target.value })}
                 disabled={updateMutation.isPending}
               >
-                {STATUS_OPTIONS.map(s => (
-                  <option key={s} value={s}>{s.replace('_', ' ')}</option>
-                ))}
+                {STATUS_OPTIONS.map(s => {
+                  const label = s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+                  return <option key={s} value={s}>{label}</option>
+                })}
               </select>
             </div>
 
@@ -304,7 +305,7 @@ export default function TicketDetailPage() {
                 disabled={updateMutation.isPending}
               >
                 {PRIORITY_OPTIONS.map(p => (
-                  <option key={p} value={p}>{p}</option>
+                  <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
                 ))}
               </select>
             </div>
@@ -383,33 +384,47 @@ export default function TicketDetailPage() {
           </div>
 
           {/* Customer info */}
-          {(ticket.customer_name || ticket.customer_email || ticket.customer_mobile) && (
-            <div className="card p-3 space-y-2">
-              <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Customer</p>
-              {ticket.customer_name && (
-                <div className="flex items-center gap-2">
-                  <User className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                  <span className="text-xs text-gray-700 dark:text-gray-300">{ticket.customer_name}</span>
-                </div>
-              )}
-              {ticket.customer_mobile && (
-                <div className="flex items-center gap-2">
-                  <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                  <a href={`tel:${ticket.customer_mobile}`} className="text-xs text-primary-600 hover:underline">
-                    {ticket.customer_mobile}
-                  </a>
-                </div>
-              )}
-              {ticket.customer_email && (
-                <div className="flex items-center gap-2">
-                  <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                  <a href={`mailto:${ticket.customer_email}`} className="text-xs text-primary-600 hover:underline truncate">
-                    {ticket.customer_email}
-                  </a>
-                </div>
-              )}
-            </div>
-          )}
+          {(() => {
+            const fd = ticket.form_data || {}
+            const name    = ticket.customer_name  || fd.customer_name  || fd.name     || ''
+            const mobile  = ticket.customer_mobile|| fd.customer_mobile|| fd.mobile   || fd.phone || ''
+            const email   = ticket.customer_email || fd.customer_email || fd.email    || ''
+            const address = fd.customer_address   || fd.address        || fd.area     || ''
+            if (!name && !mobile && !email && !address) return null
+            return (
+              <div className="card p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Customer</p>
+                {name && (
+                  <div className="flex items-center gap-2">
+                    <User className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <span className="text-xs text-gray-700 dark:text-gray-300">{name}</span>
+                  </div>
+                )}
+                {mobile && (
+                  <div className="flex items-center gap-2">
+                    <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <a href={`tel:${mobile}`} className="text-xs text-primary-600 hover:underline">
+                      {mobile}
+                    </a>
+                  </div>
+                )}
+                {email && (
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <a href={`mailto:${email}`} className="text-xs text-primary-600 hover:underline truncate">
+                      {email}
+                    </a>
+                  </div>
+                )}
+                {address && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-400 text-xs mt-0.5 flex-shrink-0">📍</span>
+                    <span className="text-xs text-gray-700 dark:text-gray-300">{address}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Tags */}
           {ticket.tags && ticket.tags.length > 0 && (
