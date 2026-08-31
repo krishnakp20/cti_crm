@@ -210,19 +210,33 @@ async def create_ticket(
     from app.services.alert_service import set_ticket_sla
     await set_ticket_sla(ticket, db)
 
-    # Link ticket to CallRecord (CDR) — create one if AMI hasn't yet
     # Link or create a CallRecord so CDR count reflects this call
     try:
         from app.models.cdr import CallRecord
         from loguru import logger
+        from sqlalchemy import and_
         fd = req.form_data or {}
         disposition = fd.get('disposition') or fd.get('call_disposition')
         existing_cr = None
 
-        # For real Asterisk calls, look up by uniqueid
+        # 1. Match by Asterisk uniqueid (IVR/queue calls)
         if dialer_call_id and not dialer_call_id.startswith('webrtc-'):
             existing_cr = (await db.execute(
                 select(CallRecord).where(CallRecord.asterisk_unique_id == dialer_call_id)
+            )).scalar_one_or_none()
+
+        # 2. Fallback: find recent unlinked record for same caller + agent (WebRTC calls)
+        if not existing_cr and ticket.customer_mobile:
+            cutoff = datetime.utcnow().replace(tzinfo=None) - __import__('datetime').timedelta(minutes=30)
+            existing_cr = (await db.execute(
+                select(CallRecord).where(
+                    and_(
+                        CallRecord.caller_number == ticket.customer_mobile,
+                        CallRecord.agent_id == current_user.id,
+                        CallRecord.ticket_id.is_(None),
+                        CallRecord.call_start_time >= cutoff,
+                    )
+                ).order_by(CallRecord.call_start_time.desc()).limit(1)
             )).scalar_one_or_none()
 
         if existing_cr:
@@ -235,9 +249,9 @@ async def create_ticket(
             if fd.get('call_tags'):
                 existing_cr.tags = fd.get('call_tags')
         else:
-            # WebRTC call or AMI event not yet arrived — create CDR row now
+            # No AMI record found — create a minimal CDR row
             uid = dialer_call_id if (dialer_call_id and not dialer_call_id.startswith('webrtc-')) else None
-            new_cr = CallRecord(
+            db.add(CallRecord(
                 asterisk_unique_id=uid,
                 caller_number=ticket.customer_mobile or '',
                 client_id=ticket.client_id,
@@ -249,8 +263,7 @@ async def create_ticket(
                 disposition=disposition,
                 call_summary=fd.get('call_summary'),
                 tags=fd.get('call_tags'),
-            )
-            db.add(new_cr)
+            ))
     except Exception as cdr_err:
         from loguru import logger
         logger.warning(f"Could not link/create CDR for ticket {ticket.id}: {cdr_err}")
