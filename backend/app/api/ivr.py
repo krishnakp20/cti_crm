@@ -313,7 +313,7 @@ async def agi_lookup(
         select(IVRConfig).where(
             IVRConfig.client_id == client_id,
             IVRConfig.is_active == True,
-        )
+        ).limit(1)
     )).scalar_one_or_none()
     if not cfg:
         return {"action": "hangup", "reason": "no_config"}
@@ -323,7 +323,7 @@ async def agi_lookup(
             IVRRoute.ivr_config_id == cfg.id,
             IVRRoute.press_key == press_key,
             IVRRoute.is_active == True,
-        )
+        ).limit(1)
     )).scalar_one_or_none()
     if not route:
         return {"action": "hangup", "reason": "no_route"}
