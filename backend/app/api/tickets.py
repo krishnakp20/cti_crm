@@ -210,21 +210,9 @@ async def create_ticket(
     from app.services.alert_service import set_ticket_sla
     await set_ticket_sla(ticket, db)
 
-    # Link ticket back to its originating call records (best-effort)
+    # Link ticket to CallRecord (CDR) — create one if AMI hasn't yet
     if dialer_call_id:
-        # Link to CallLog (ViciBox dialer) — ignore if column missing
         try:
-            from app.models.call import CallLog
-            from sqlalchemy import inspect as sa_inspect
-            cols = {c.key for c in sa_inspect(CallLog).mapper.column_attrs}
-            if 'ticket_id' in cols:
-                await db.execute(
-                    update(CallLog).where(CallLog.dialer_call_id == dialer_call_id).values(ticket_id=ticket.id)
-                )
-        except Exception:
-            pass
-
-        # Link to CallRecord (CDR) — create one if AMI hasn't yet
         try:
             from app.models.cdr import CallRecord
             existing_cr = (await db.execute(
