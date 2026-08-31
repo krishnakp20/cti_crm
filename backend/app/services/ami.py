@@ -330,10 +330,7 @@ class AMIClient:
                 rec.department = call.get("department") or _queue_to_dept(pkt.get("Queue", ""))
 
                 if rec.queue_start_time:
-                    qs = rec.queue_start_time
-                    if qs.tzinfo is None:
-                        from datetime import timezone as tz
-                        qs = qs.replace(tzinfo=tz.utc)
+                    qs = rec.queue_start_time.replace(tzinfo=None)
                     rec.queue_duration = int((now - qs).total_seconds())
                 elif call.get("queue_duration"):
                     rec.queue_duration = call["queue_duration"]
