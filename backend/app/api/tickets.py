@@ -211,15 +211,25 @@ async def create_ticket(
     await set_ticket_sla(ticket, db)
 
     # Link ticket to CallRecord (CDR) — create one if AMI hasn't yet
-    if dialer_call_id:
+    from loguru import logger
+    logger.info(f"Ticket {ticket.id}: dialer_call_id={dialer_call_id!r}")
+    if dialer_call_id and not dialer_call_id.startswith('webrtc-'):
         try:
             from app.models.cdr import CallRecord
             existing_cr = (await db.execute(
                 select(CallRecord).where(CallRecord.asterisk_unique_id == dialer_call_id)
             )).scalar_one_or_none()
+            logger.info(f"Ticket {ticket.id}: existing_cr={existing_cr}")
             if existing_cr:
                 existing_cr.ticket_id = ticket.id
                 existing_cr.call_status = 'answered'
+                fd = req.form_data or {}
+                if fd.get('disposition') or fd.get('call_disposition'):
+                    existing_cr.disposition = fd.get('disposition') or fd.get('call_disposition')
+                if fd.get('call_summary'):
+                    existing_cr.call_summary = fd.get('call_summary')
+                if fd.get('call_tags'):
+                    existing_cr.tags = fd.get('call_tags')
             else:
                 # AMI event may not have arrived yet; create a minimal CDR row
                 fd = req.form_data or {}
@@ -237,9 +247,9 @@ async def create_ticket(
                     tags=fd.get('call_tags'),
                 )
                 db.add(new_cr)
+                logger.info(f"Ticket {ticket.id}: created new CallRecord for uid={dialer_call_id}")
         except Exception as cdr_err:
-            from loguru import logger
-            logger.warning(f"Could not link/create CDR for ticket: {cdr_err}")
+            logger.warning(f"Could not link/create CDR for ticket {ticket.id}: {cdr_err}")
 
     log = TicketLog(ticket_id=ticket.id, user_id=current_user.id, action="created", new_value="Ticket created")
     db.add(log)
