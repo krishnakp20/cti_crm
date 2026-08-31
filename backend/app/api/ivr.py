@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import Optional
 from pydantic import BaseModel
 
@@ -42,15 +43,6 @@ class ConfigCreate(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _route_dict(r: IVRRoute, agents: dict) -> dict:
-    ov = None
-    if r.override:
-        ov = {
-            "id": r.override.id,
-            "override_agent_id": r.override.override_agent_id,
-            "override_agent_name": agents.get(r.override.override_agent_id, {}).get("name"),
-            "override_agent_extension": agents.get(r.override.override_agent_id, {}).get("extension"),
-            "reason": r.override.reason,
-        }
     return {
         "id": r.id,
         "ivr_config_id": r.ivr_config_id,
@@ -69,7 +61,7 @@ def _route_dict(r: IVRRoute, agents: dict) -> dict:
         "notes": r.notes,
         "sort_order": r.sort_order,
         "is_active": r.is_active,
-        "override": ov,
+        "override": None,
     }
 
 
@@ -155,15 +147,44 @@ async def list_routes(
         select(IVRRoute).where(IVRRoute.ivr_config_id == config_id).order_by(IVRRoute.sort_order)
     )).scalars().all()
 
+    # Load active overrides for these routes explicitly (avoid lazy-load in async)
+    route_ids = [r.id for r in rows]
+    override_map: dict = {}
+    if route_ids:
+        ov_rows = (await db.execute(
+            select(IVRRouteOverride).where(
+                IVRRouteOverride.ivr_route_id.in_(route_ids),
+                IVRRouteOverride.is_active == True,
+            )
+        )).scalars().all()
+        for ov in ov_rows:
+            override_map[ov.ivr_route_id] = ov
+
     # Collect all agent IDs for bulk lookup
     ids = set()
     for r in rows:
         if r.primary_agent_id: ids.add(r.primary_agent_id)
         if r.backup_agent_id: ids.add(r.backup_agent_id)
-        if r.override and r.override.override_agent_id: ids.add(r.override.override_agent_id)
+        ov = override_map.get(r.id)
+        if ov: ids.add(ov.override_agent_id)
     agents = await _agent_map(db, list(ids))
 
-    return [_route_dict(r, agents) for r in rows]
+    result = []
+    for r in rows:
+        ov = override_map.get(r.id)
+        ov_dict = None
+        if ov:
+            ov_dict = {
+                "id": ov.id,
+                "override_agent_id": ov.override_agent_id,
+                "override_agent_name": agents.get(ov.override_agent_id, {}).get("name"),
+                "override_agent_extension": agents.get(ov.override_agent_id, {}).get("extension"),
+                "reason": ov.reason,
+            }
+        d = _route_dict(r, agents)
+        d["override"] = ov_dict
+        result.append(d)
+    return result
 
 
 @router.post("/configs/{config_id}/routes")
