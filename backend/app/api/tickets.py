@@ -211,45 +211,49 @@ async def create_ticket(
     await set_ticket_sla(ticket, db)
 
     # Link ticket to CallRecord (CDR) — create one if AMI hasn't yet
-    from loguru import logger
-    logger.info(f"Ticket {ticket.id}: dialer_call_id={dialer_call_id!r}")
-    if dialer_call_id and not dialer_call_id.startswith('webrtc-'):
-        try:
-            from app.models.cdr import CallRecord
+    # Link or create a CallRecord so CDR count reflects this call
+    try:
+        from app.models.cdr import CallRecord
+        from loguru import logger
+        fd = req.form_data or {}
+        disposition = fd.get('disposition') or fd.get('call_disposition')
+        existing_cr = None
+
+        # For real Asterisk calls, look up by uniqueid
+        if dialer_call_id and not dialer_call_id.startswith('webrtc-'):
             existing_cr = (await db.execute(
                 select(CallRecord).where(CallRecord.asterisk_unique_id == dialer_call_id)
             )).scalar_one_or_none()
-            logger.info(f"Ticket {ticket.id}: existing_cr={existing_cr}")
-            if existing_cr:
-                existing_cr.ticket_id = ticket.id
-                existing_cr.call_status = 'answered'
-                fd = req.form_data or {}
-                if fd.get('disposition') or fd.get('call_disposition'):
-                    existing_cr.disposition = fd.get('disposition') or fd.get('call_disposition')
-                if fd.get('call_summary'):
-                    existing_cr.call_summary = fd.get('call_summary')
-                if fd.get('call_tags'):
-                    existing_cr.tags = fd.get('call_tags')
-            else:
-                # AMI event may not have arrived yet; create a minimal CDR row
-                fd = req.form_data or {}
-                new_cr = CallRecord(
-                    asterisk_unique_id=dialer_call_id,
-                    caller_number=ticket.customer_mobile or '',
-                    client_id=ticket.client_id,
-                    agent_id=current_user.id,
-                    agent_name=current_user.full_name,
-                    call_status='answered',
-                    call_start_time=ticket.created_at,
-                    ticket_id=ticket.id,
-                    disposition=fd.get('disposition') or fd.get('call_disposition'),
-                    call_summary=fd.get('call_summary'),
-                    tags=fd.get('call_tags'),
-                )
-                db.add(new_cr)
-                logger.info(f"Ticket {ticket.id}: created new CallRecord for uid={dialer_call_id}")
-        except Exception as cdr_err:
-            logger.warning(f"Could not link/create CDR for ticket {ticket.id}: {cdr_err}")
+
+        if existing_cr:
+            existing_cr.ticket_id = ticket.id
+            existing_cr.call_status = 'answered'
+            if disposition:
+                existing_cr.disposition = disposition
+            if fd.get('call_summary'):
+                existing_cr.call_summary = fd.get('call_summary')
+            if fd.get('call_tags'):
+                existing_cr.tags = fd.get('call_tags')
+        else:
+            # WebRTC call or AMI event not yet arrived — create CDR row now
+            uid = dialer_call_id if (dialer_call_id and not dialer_call_id.startswith('webrtc-')) else None
+            new_cr = CallRecord(
+                asterisk_unique_id=uid,
+                caller_number=ticket.customer_mobile or '',
+                client_id=ticket.client_id,
+                agent_id=current_user.id,
+                agent_name=current_user.full_name,
+                call_status='answered',
+                call_start_time=ticket.created_at,
+                ticket_id=ticket.id,
+                disposition=disposition,
+                call_summary=fd.get('call_summary'),
+                tags=fd.get('call_tags'),
+            )
+            db.add(new_cr)
+    except Exception as cdr_err:
+        from loguru import logger
+        logger.warning(f"Could not link/create CDR for ticket {ticket.id}: {cdr_err}")
 
     log = TicketLog(ticket_id=ticket.id, user_id=current_user.id, action="created", new_value="Ticket created")
     db.add(log)
