@@ -84,7 +84,7 @@ def hangup():
 
 # ── API lookup ────────────────────────────────────────────────────────────────
 
-API_BASE = os.getenv("CTI_API_URL", "http://localhost:8001/api/v1")
+API_BASE = os.getenv("CTI_API_URL", "http://localhost:8055/api/v1")
 
 def lookup_route(client_id, press_key):
     url = f"{API_BASE}/ivr/lookup?client_id={client_id}&press_key={press_key}"
