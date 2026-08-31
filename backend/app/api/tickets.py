@@ -210,16 +210,49 @@ async def create_ticket(
     from app.services.alert_service import set_ticket_sla
     await set_ticket_sla(ticket, db)
 
-    # Link ticket back to its originating call log (best-effort)
+    # Link ticket back to its originating call records (best-effort)
     if dialer_call_id:
+        # Link to CallLog (ViciBox dialer) — ignore if column missing
         try:
             from app.models.call import CallLog
-            await db.execute(
-                update(CallLog).where(CallLog.dialer_call_id == dialer_call_id).values(ticket_id=ticket.id)
-            )
-        except Exception as link_err:
+            from sqlalchemy import inspect as sa_inspect
+            cols = {c.key for c in sa_inspect(CallLog).mapper.column_attrs}
+            if 'ticket_id' in cols:
+                await db.execute(
+                    update(CallLog).where(CallLog.dialer_call_id == dialer_call_id).values(ticket_id=ticket.id)
+                )
+        except Exception:
+            pass
+
+        # Link to CallRecord (CDR) — create one if AMI hasn't yet
+        try:
+            from app.models.cdr import CallRecord
+            existing_cr = (await db.execute(
+                select(CallRecord).where(CallRecord.asterisk_unique_id == dialer_call_id)
+            )).scalar_one_or_none()
+            if existing_cr:
+                existing_cr.ticket_id = ticket.id
+                existing_cr.call_status = 'answered'
+            else:
+                # AMI event may not have arrived yet; create a minimal CDR row
+                fd = req.form_data or {}
+                new_cr = CallRecord(
+                    asterisk_unique_id=dialer_call_id,
+                    caller_number=ticket.customer_mobile or '',
+                    client_id=ticket.client_id,
+                    agent_id=current_user.id,
+                    agent_name=current_user.full_name,
+                    call_status='answered',
+                    call_start_time=ticket.created_at,
+                    ticket_id=ticket.id,
+                    disposition=fd.get('disposition') or fd.get('call_disposition'),
+                    call_summary=fd.get('call_summary'),
+                    tags=fd.get('call_tags'),
+                )
+                db.add(new_cr)
+        except Exception as cdr_err:
             from loguru import logger
-            logger.warning(f"Could not link call log to ticket: {link_err}")
+            logger.warning(f"Could not link/create CDR for ticket: {cdr_err}")
 
     log = TicketLog(ticket_id=ticket.id, user_id=current_user.id, action="created", new_value="Ticket created")
     db.add(log)
