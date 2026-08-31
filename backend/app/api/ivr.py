@@ -22,6 +22,7 @@ class RouteUpsert(BaseModel):
     backup_type: BackupType = BackupType.NONE
     backup_agent_id: Optional[int] = None
     backup_number: Optional[str] = None
+    queue_name: Optional[str] = None
     dept_audio: Optional[str] = None
     notes: Optional[str] = None
     sort_order: int = 0
@@ -57,6 +58,7 @@ def _route_dict(r: IVRRoute, agents: dict) -> dict:
         "backup_agent_name": agents.get(r.backup_agent_id, {}).get("name") if r.backup_agent_id else None,
         "backup_agent_extension": agents.get(r.backup_agent_id, {}).get("extension") if r.backup_agent_id else None,
         "backup_number": r.backup_number,
+        "queue_name": r.queue_name,
         "dept_audio": r.dept_audio,
         "notes": r.notes,
         "sort_order": r.sort_order,
@@ -353,9 +355,11 @@ async def agi_lookup(
         "action": "dial",
         "department": route.department_name,
         "ring_timeout": cfg.ring_timeout,
+        "queue_name": route.queue_name,
         "primary_extension": agent_ext,
         "backup_type": route.backup_type,
         "backup_extension": backup_ext,
         "backup_number": route.backup_number,
         "override_active": override is not None,
+        "override_extension": agent_ext if override else None,
     }

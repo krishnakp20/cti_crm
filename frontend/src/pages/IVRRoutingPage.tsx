@@ -131,6 +131,7 @@ export default function IVRRoutingPage() {
       backup_type: fd.get('backup_type') as string,
       backup_agent_id: fd.get('backup_agent_id') ? Number(fd.get('backup_agent_id')) : null,
       backup_number: fd.get('backup_number') as string || null,
+      queue_name: fd.get('queue_name') as string || null,
       dept_audio: fd.get('dept_audio') as string || null,
       notes: fd.get('notes') as string || null,
       sort_order: Number(fd.get('sort_order') || 0),
@@ -402,6 +403,12 @@ export default function IVRRoutingPage() {
                   <input name="backup_number" className="input" defaultValue={editRoute.backup_number ?? ''} placeholder="e.g. 2005 or +911234567890" />
                 </div>
               )}
+
+              <div>
+                <label className="label">Queue Name <span className="text-xs text-gray-400 font-normal">(recommended)</span></label>
+                <input name="queue_name" className="input" defaultValue={editRoute.queue_name ?? ''} placeholder="e.g. q-general, q-sales-day" />
+                <p className="text-xs text-gray-400 mt-1">Asterisk queue name — enables call queuing when agent is busy</p>
+              </div>
 
               <div>
                 <label className="label">Department Audio File</label>

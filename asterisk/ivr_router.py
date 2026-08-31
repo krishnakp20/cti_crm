@@ -122,22 +122,46 @@ def main():
         hangup()
         return
 
-    department    = route.get("department", "")
-    primary_ext   = route.get("primary_extension")
-    backup_type   = route.get("backup_type", "none")
-    backup_ext    = route.get("backup_extension")
-    backup_number = route.get("backup_number")
-    ring_timeout  = int(route.get("ring_timeout", 30))
+    department       = route.get("department", "")
+    queue_name       = route.get("queue_name")
+    primary_ext      = route.get("primary_extension")
+    backup_type      = route.get("backup_type", "none")
+    backup_ext       = route.get("backup_extension")
+    backup_number    = route.get("backup_number")
+    ring_timeout     = int(route.get("ring_timeout", 30))
+    override_active  = route.get("override_active", False)
+    override_ext     = route.get("override_extension")
 
     set_variable("IVR_DEPARTMENT", department)
     set_variable("IVR_SELECTION", press_key)
 
+    # Override: dial replacement agent directly (bypasses queue)
+    if override_active and override_ext:
+        verbose(f"ivr_router: override active — dialing {override_ext}")
+        agi_send(f'EXEC Dial "PJSIP/{override_ext},{ring_timeout},tr"')
+        dial_status = get_variable("DIALSTATUS")
+        if dial_status == "ANSWER":
+            hangup()
+            return
+        agi_send('EXEC Playback "vm-nobodyavail"')
+        hangup()
+        return
+
+    # Normal routing: use Queue if configured (handles queueing + backup via members)
+    if queue_name:
+        verbose(f"ivr_router: routing to queue={queue_name}")
+        agi_send(f'EXEC Queue "{queue_name},tr,,{ring_timeout},{ring_timeout}"')
+        queue_result = get_variable("QUEUESTATUS")
+        verbose(f"ivr_router: QUEUESTATUS={queue_result}")
+        hangup()
+        return
+
+    # Fallback: direct dial if no queue configured
     if not primary_ext:
         agi_send('EXEC Playback "vm-sorry"')
         hangup()
         return
 
-    # Dial primary agent
     agi_send(f'EXEC Dial "PJSIP/{primary_ext},{ring_timeout},tr"')
     dial_status = get_variable("DIALSTATUS")
     verbose(f"ivr_router: DIALSTATUS={dial_status}")
@@ -146,7 +170,6 @@ def main():
         hangup()
         return
 
-    # Primary did not answer — try backup
     if backup_type == "agent" and backup_ext:
         agi_send(f'EXEC Dial "PJSIP/{backup_ext},{ring_timeout},tr"')
     elif backup_type == "voicemail":

@@ -40,6 +40,7 @@ class IVRRoute(Base):
     backup_type: Mapped[BackupType] = mapped_column(Enum(BackupType), default=BackupType.NONE)
     backup_agent_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
     backup_number: Mapped[Optional[str]] = mapped_column(String(50))
+    queue_name: Mapped[Optional[str]] = mapped_column(String(100))
     dept_audio: Mapped[Optional[str]] = mapped_column(String(255))
     notes: Mapped[Optional[str]] = mapped_column(Text)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
