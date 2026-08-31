@@ -225,14 +225,16 @@ async def create_ticket(
                 select(CallRecord).where(CallRecord.asterisk_unique_id == dialer_call_id)
             )).scalar_one_or_none()
 
-        # 2. Fallback: find recent unlinked record for same caller + agent (WebRTC calls)
+        # 2. Fallback: find recent unlinked record for same caller (IVR queue calls where
+        #    agent_id may still be null at ticket-save time — don't filter by agent)
         if not existing_cr and ticket.customer_mobile:
-            cutoff = datetime.now().replace(tzinfo=None) - __import__('datetime').timedelta(minutes=30)
+            from datetime import timedelta
+            cutoff = datetime.now().replace(tzinfo=None) - timedelta(minutes=30)
             existing_cr = (await db.execute(
                 select(CallRecord).where(
                     and_(
                         CallRecord.caller_number == ticket.customer_mobile,
-                        CallRecord.agent_id == current_user.id,
+                        CallRecord.client_id == ticket.client_id,
                         CallRecord.ticket_id.is_(None),
                         CallRecord.call_start_time >= cutoff,
                     )
@@ -242,6 +244,11 @@ async def create_ticket(
         if existing_cr:
             existing_cr.ticket_id = ticket.id
             existing_cr.call_status = 'answered'
+            # Fill agent info if AMI hadn't set it yet
+            if not existing_cr.agent_id:
+                existing_cr.agent_id = current_user.id
+            if not existing_cr.agent_name:
+                existing_cr.agent_name = current_user.full_name
             if disposition:
                 existing_cr.disposition = disposition
             if fd.get('call_summary'):
