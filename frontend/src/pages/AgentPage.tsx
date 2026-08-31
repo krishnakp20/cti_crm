@@ -554,20 +554,17 @@ export default function AgentPage() {
     setSaving(false)
   }
 
-  // End call → if no disposition, enter wrap-up gate
+  // End call → hang up SIP session, then enter wrap-up gate
   const endCall = () => {
     if (!activeCall) return
-    if (disposition) {
-      // Disposition filled — save and clear
-      saveAndCreate()
-    } else {
-      // Enter mandatory wrap-up
-      setWrapup({ call: activeCall, formValues: { ...formValues } })
-      setWrapupDisposition('')
-      setWrapupSummary(callSummary)
-      setWrapupTags([...callTags])
-      setActiveCall(null)
-    }
+    // Terminate WebRTC session if active
+    sipHangup()
+    // Always enter wrap-up (agent must submit disposition before becoming available)
+    setWrapup({ call: activeCall, formValues: { ...formValues } })
+    setWrapupDisposition(disposition)
+    setWrapupSummary(callSummary)
+    setWrapupTags([...callTags])
+    setActiveCall(null)
   }
 
   // Submit wrap-up
@@ -844,13 +841,6 @@ export default function AgentPage() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={saveAndCreate} disabled={saving}
-                className="btn-sm bg-green-600 text-white hover:bg-green-700 flex items-center gap-1"
-              >
-                <Save className="w-3.5 h-3.5" />
-                {saving ? 'Saving…' : 'Save Ticket'}
-              </button>
-              <button
                 onClick={endCall}
                 className="btn-sm bg-red-600 text-white hover:bg-red-700 flex items-center gap-1"
               >
@@ -887,7 +877,8 @@ export default function AgentPage() {
 
             {/* ─ Dynamic form fields ─ */}
             {activeCall.form && activeCall.form.fields.filter(f =>
-              !['customer_name','name','mobile','phone','email','customer_email','customer_mobile'].includes(f.field_name)
+              !['customer_name','name','mobile','phone','email','customer_email','customer_mobile',
+                'call_tags','call_disposition','disposition','call_summary','summary'].includes(f.field_name)
             ).length > 0 && (
               <div className="lg:col-span-2">
                 <SectionLabel>
@@ -897,7 +888,8 @@ export default function AgentPage() {
                 </SectionLabel>
                 <div className="grid grid-cols-2 gap-3">
                   {activeCall.form.fields
-                    .filter(f => !['customer_name','name','mobile','phone','email','customer_email','customer_mobile'].includes(f.field_name))
+                    .filter(f => !['customer_name','name','mobile','phone','email','customer_email','customer_mobile',
+                      'call_tags','call_disposition','disposition','call_summary','summary'].includes(f.field_name))
                     .map(f => (
                       <div key={f.id} className={f.field_type === 'textarea' ? 'col-span-2' : ''}>
                         <label className="label">{f.label}{f.is_required && <span className="text-red-500 ml-1">*</span>}</label>
