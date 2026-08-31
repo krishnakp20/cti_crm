@@ -213,7 +213,6 @@ async def create_ticket(
     # Link ticket to CallRecord (CDR) — create one if AMI hasn't yet
     if dialer_call_id:
         try:
-        try:
             from app.models.cdr import CallRecord
             existing_cr = (await db.execute(
                 select(CallRecord).where(CallRecord.asterisk_unique_id == dialer_call_id)
