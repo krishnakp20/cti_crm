@@ -51,7 +51,11 @@ interface WrapupData {
 }
 
 // ── WebSocket hook ─────────────────────────────────────────────────────────────
-function useAgentWebSocket(token: string | null, onCallArrive: (call: IncomingCall) => void) {
+function useAgentWebSocket(
+  token: string | null,
+  onCallArrive: (call: IncomingCall) => void,
+  onAgentConnect: (uniqueid: string, callerNumber: string) => void,
+) {
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>()
@@ -74,6 +78,10 @@ function useAgentWebSocket(token: string | null, onCallArrive: (call: IncomingCa
       try {
         const msg = JSON.parse(e.data)
         if (msg.type === 'call_arrive') onCallArrive(msg as IncomingCall)
+        // AMI AgentConnect fires when agent picks up — capture real Asterisk uniqueid
+        if (msg.type === 'agent_connect' && msg.uniqueid) {
+          onAgentConnect(msg.uniqueid, msg.caller || msg.caller_id || '')
+        }
       } catch { /* ignore */ }
     }
 
@@ -83,7 +91,7 @@ function useAgentWebSocket(token: string | null, onCallArrive: (call: IncomingCa
     }
 
     ws.onerror = () => ws.close()
-  }, [token, onCallArrive])
+  }, [token, onCallArrive, onAgentConnect])
 
   useEffect(() => {
     connect()
@@ -434,7 +442,20 @@ export default function AgentPage() {
     setActiveCall(resolvedCall)
   }, [])
 
-  const wsConnected = useAgentWebSocket(token, handleCallArrive)
+  // When AMI AgentConnect fires, replace the webrtc- placeholder uniqueid with the
+  // real Asterisk uniqueid so ticket save can do an exact match — no fallback needed.
+  const handleAgentConnect = useCallback((uniqueid: string, callerNumber: string) => {
+    setActiveCall(prev => {
+      if (!prev) return prev
+      // Match by caller number in case call_arrive already set caller_id
+      if (prev.caller_id === callerNumber || prev.uniqueid.startsWith('webrtc-')) {
+        return { ...prev, uniqueid }
+      }
+      return prev
+    })
+  }, [])
+
+  const wsConnected = useAgentWebSocket(token, handleCallArrive, handleAgentConnect)
 
   // Build SIP config from current state; null disables the hook
   const sipConfig: SipConfig | null = (connectionType === 'webrtc' && extension && sipPassword && sipServerUrl)
