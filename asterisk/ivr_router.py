@@ -97,7 +97,7 @@ def lookup_route(client_id, press_key):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    # Read AGI environment
+    # Read AGI environment headers
     env = {}
     while True:
         line = agi_read()
@@ -107,97 +107,55 @@ def main():
             k, v = line.split(":", 1)
             env[k.strip()] = v.strip()
 
+    # Args: client_id, press_key (passed from dialplan AGI call)
     args = sys.argv[1:] if len(sys.argv) > 1 else []
-    client_id = args[0] if args else get_variable("CLIENT_ID")
-    if not client_id:
-        verbose("ivr_router: CLIENT_ID not set")
+    client_id = args[0] if len(args) > 0 else "6"
+    press_key  = args[1] if len(args) > 1 else ""
+
+    verbose(f"ivr_router: client={client_id} key={press_key}")
+
+    route = lookup_route(client_id, press_key)
+    verbose(f"ivr_router: route={route}")
+
+    if route.get("action") == "hangup":
+        agi_send('EXEC Playback "vm-sorry"')
         hangup()
         return
 
-    answer()
-    time.sleep(0.5)
+    department    = route.get("department", "")
+    primary_ext   = route.get("primary_extension")
+    backup_type   = route.get("backup_type", "none")
+    backup_ext    = route.get("backup_extension")
+    backup_number = route.get("backup_number")
+    ring_timeout  = int(route.get("ring_timeout", 30))
 
-    # Play welcome message (3 attempts for invalid input)
-    for attempt in range(3):
-        # Play welcome/menu audio
-        welcome_audio = get_variable("IVR_WELCOME_AUDIO") or "custom/welcome"
-        pressed = stream_file(welcome_audio, "0123456789*#")
-        if not pressed:
-            pressed = wait_for_digit(7000)
+    set_variable("IVR_DEPARTMENT", department)
+    set_variable("IVR_SELECTION", press_key)
 
-        if not pressed:
-            stream_file("ivr/invalid")
-            continue
-
-        # Lookup route from API
-        route = lookup_route(client_id, pressed)
-        verbose(f"ivr_router: client={client_id} key={pressed} route={route}")
-
-        if route.get("action") == "hangup":
-            verbose(f"ivr_router: hangup reason={route.get('reason')}")
-            stream_file("ivr/invalid")
-            continue
-
-        department = route.get("department", "")
-        primary_ext = route.get("primary_extension")
-        backup_type = route.get("backup_type", "none")
-        backup_ext = route.get("backup_extension")
-        backup_number = route.get("backup_number")
-        ring_timeout = int(route.get("ring_timeout", 30))
-        override_active = route.get("override_active", False)
-
-        if override_active:
-            verbose(f"ivr_router: override active for key={pressed}")
-
-        set_variable("IVR_DEPARTMENT", department)
-        set_variable("IVR_SELECTION", pressed)
-
-        if not primary_ext:
-            verbose("ivr_router: no primary extension configured")
-            stream_file("vm-sorry")
-            hangup()
-            return
-
-        # Dial primary agent
-        verbose(f"ivr_router: dialing primary ext={primary_ext} timeout={ring_timeout}")
-        result = agi_send(f'EXEC Dial "PJSIP/{primary_ext},{ring_timeout},tr"')
-        dial_status = get_variable("DIALSTATUS")
-        verbose(f"ivr_router: DIALSTATUS={dial_status}")
-
-        if dial_status in ("ANSWER",):
-            # Call connected — normal hangup
-            hangup()
-            return
-
-        # Primary did not answer — try backup
-        if backup_type == "agent" and backup_ext:
-            verbose(f"ivr_router: backup agent ext={backup_ext}")
-            agi_send(f'EXEC Dial "PJSIP/{backup_ext},{ring_timeout},tr"')
-            backup_status = get_variable("DIALSTATUS")
-            if backup_status == "ANSWER":
-                hangup()
-                return
-
-        elif backup_type == "voicemail":
-            verbose(f"ivr_router: dropping to voicemail")
-            # Mailbox = primary extension number
-            agi_send(f'EXEC VoiceMail "{primary_ext},u"')
-            hangup()
-            return
-
-        elif backup_type == "forwarding" and backup_number:
-            verbose(f"ivr_router: forwarding to {backup_number}")
-            agi_send(f'EXEC Dial "PJSIP/{backup_number},{ring_timeout},tr"')
-            hangup()
-            return
-
-        # No answer anywhere
-        stream_file("vm-nobodyavail")
+    if not primary_ext:
+        agi_send('EXEC Playback "vm-sorry"')
         hangup()
         return
 
-    # Exhausted attempts
-    stream_file("vm-goodbye")
+    # Dial primary agent
+    agi_send(f'EXEC Dial "PJSIP/{primary_ext},{ring_timeout},tr"')
+    dial_status = get_variable("DIALSTATUS")
+    verbose(f"ivr_router: DIALSTATUS={dial_status}")
+
+    if dial_status == "ANSWER":
+        hangup()
+        return
+
+    # Primary did not answer — try backup
+    if backup_type == "agent" and backup_ext:
+        agi_send(f'EXEC Dial "PJSIP/{backup_ext},{ring_timeout},tr"')
+    elif backup_type == "voicemail":
+        agi_send(f'EXEC VoiceMail "{primary_ext},u"')
+    elif backup_type == "forwarding" and backup_number:
+        agi_send(f'EXEC Dial "PJSIP/{backup_number},{ring_timeout},tr"')
+    else:
+        agi_send('EXEC Playback "vm-nobodyavail"')
+
     hangup()
 
 
