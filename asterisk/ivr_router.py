@@ -135,6 +135,12 @@ def main():
     set_variable("IVR_DEPARTMENT", department)
     set_variable("IVR_SELECTION", press_key)
 
+    # Start recording for all calls
+    call_uid = get_variable("UNIQUEID") or str(int(time.time()))
+    rec_file = f"/var/spool/asterisk/monitor/{call_uid}.wav"
+    agi_send(f'EXEC MixMonitor "{rec_file},b"')
+    verbose(f"ivr_router: recording to {rec_file}")
+
     # Override: dial replacement agent directly
     if override_active and override_ext:
         verbose(f"ivr_router: override active — dialing {override_ext}")
