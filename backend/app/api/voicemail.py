@@ -32,7 +32,7 @@ def _list_messages(ext: str, folder: str = "INBOX") -> list:
     if not path.exists():
         return []
     messages = []
-    for wav in sorted(path.glob("msg*.WAV")):
+    for wav in sorted(path.glob("msg*.wav")):
         stem = wav.stem  # e.g. msg0000
         txt = path / f"{stem}.txt"
         meta = _parse_txt(txt) if txt.exists() else {}
@@ -111,7 +111,10 @@ async def play_voicemail(
     if current_user.role == UserRole.AGENT and current_user.extension != ext:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    wav = _mailbox_path(ext) / folder / f"{stem}.WAV"
+    # Try lowercase .wav first (proper WAV), fallback to uppercase .WAV (raw Asterisk)
+    wav = _mailbox_path(ext) / folder / f"{stem}.wav"
+    if not wav.exists():
+        wav = _mailbox_path(ext) / folder / f"{stem}.WAV"
     if not wav.exists():
         raise HTTPException(status_code=404, detail="Voicemail not found")
 
