@@ -31,6 +31,7 @@ import PermissionsPage from './pages/PermissionsPage'
 import TeamsPage from './pages/TeamsPage'
 import IVRRoutingPage from './pages/IVRRoutingPage'
 import NotFoundPage from './pages/NotFoundPage'
+import VoicemailPage from './pages/VoicemailPage'
 
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -81,6 +82,7 @@ export default function App() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/agent" element={<AgentPage />} />
+        <Route path="/voicemail" element={<VoicemailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 

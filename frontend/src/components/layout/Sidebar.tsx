@@ -7,7 +7,7 @@ import { cn } from '../../utils/cn'
 import {
   LayoutDashboard, Ticket, FileText, Users, Building2, Phone,
   Bell, BarChart3, Shield, Settings, LogOut, ChevronLeft, ChevronRight,
-  Headphones, Megaphone, KeyRound, X, Radio, PhoneCall, GitBranch,
+  Headphones, Megaphone, KeyRound, X, Radio, PhoneCall, GitBranch, Voicemail,
 } from 'lucide-react'
 
 const navGroups = [
@@ -28,6 +28,7 @@ const navGroups = [
       { to: '/ivr-report', icon: PhoneCall, label: 'IVR Report' },
       { to: '/ivr-routing', icon: GitBranch, label: 'IVR Routing', roles: ['admin', 'client'] },
       { to: '/agent', icon: Headphones, label: 'Agent Panel', roles: ['agent'] },
+      { to: '/voicemail', icon: Voicemail, label: 'Voicemail' },
     ],
   },
   {
