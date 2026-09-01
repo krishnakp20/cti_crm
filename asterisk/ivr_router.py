@@ -86,6 +86,18 @@ def hangup():
 
 API_BASE = os.getenv("CTI_API_URL", "http://localhost:8055/api/v1")
 
+# Voicemail mailbox per queue — caller leaves message here when no agent answers
+QUEUE_VOICEMAIL = {
+    "q-general":  "2001@default",
+    "q-sales-day": "2002@default",
+    "q-sales-eve": "2002@default",
+    "q-support-day": "2003@default",
+    "q-support-eve": "2003@default",
+    "q-accounts":  "2004@default",
+    "q-hr":        "2005@default",
+    "q-operator":  "2001@default",
+}
+
 def lookup_route(client_id, press_key):
     url = f"{API_BASE}/ivr/lookup?client_id={client_id}&press_key={press_key}"
     try:
@@ -156,10 +168,22 @@ def main():
     # Normal routing: use Queue if configured (handles queueing + waiting)
     if queue_name:
         verbose(f"ivr_router: routing to queue={queue_name}")
-        # Queue(name,options,url,announce,timeout) — 5th param is max wait seconds
         agi_send(f'EXEC Queue "{queue_name},tr,,,{ring_timeout}"')
         queue_result = get_variable("QUEUESTATUS")
         verbose(f"ivr_router: QUEUESTATUS={queue_result}")
+        # Queue exited without answer — offer voicemail
+        if queue_result in ("TIMEOUT", "JOINEMPTY", "LEAVEEMPTY", "JOINUNAVAIL", "LEAVEUNAVAIL", ""):
+            mailbox = QUEUE_VOICEMAIL.get(queue_name)
+            if mailbox:
+                agi_send('EXEC Playback "vm-nobodyavail"')
+                agi_send(f'EXEC VoiceMail "{mailbox},u"')
+            else:
+                mailbox = QUEUE_VOICEMAIL.get(queue_name or "")
+        if mailbox:
+            agi_send('EXEC Playback "vm-nobodyavail"')
+            agi_send(f'EXEC VoiceMail "{mailbox},u"')
+        else:
+            agi_send('EXEC Playback "vm-nobodyavail"')
         hangup()
         return
 
