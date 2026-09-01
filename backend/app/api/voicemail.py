@@ -118,7 +118,11 @@ async def play_voicemail(
     if not wav.exists():
         raise HTTPException(status_code=404, detail="Voicemail not found")
 
-    return FileResponse(str(wav), media_type="audio/wav", filename=f"{msg_id}.wav")
+    return FileResponse(
+        str(wav),
+        media_type="audio/wav",
+        headers={"Content-Disposition": f"inline; filename={msg_id}.wav"},
+    )
 
 
 @router.delete("/{msg_id}")
