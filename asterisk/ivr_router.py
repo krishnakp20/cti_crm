@@ -171,19 +171,14 @@ def main():
         agi_send(f'EXEC Queue "{queue_name},tr,,,{ring_timeout}"')
         queue_result = get_variable("QUEUESTATUS")
         verbose(f"ivr_router: QUEUESTATUS={queue_result}")
-        # Queue exited without answer — offer voicemail
-        if queue_result in ("TIMEOUT", "JOINEMPTY", "LEAVEEMPTY", "JOINUNAVAIL", "LEAVEUNAVAIL", ""):
+        # Only go to voicemail when call was NOT answered by an agent
+        if queue_result in ("TIMEOUT", "JOINEMPTY", "LEAVEEMPTY", "JOINUNAVAIL", "LEAVEUNAVAIL"):
             mailbox = QUEUE_VOICEMAIL.get(queue_name)
             if mailbox:
                 agi_send('EXEC Playback "vm-nobodyavail"')
                 agi_send(f'EXEC VoiceMail "{mailbox},u"')
             else:
-                mailbox = QUEUE_VOICEMAIL.get(queue_name or "")
-        if mailbox:
-            agi_send('EXEC Playback "vm-nobodyavail"')
-            agi_send(f'EXEC VoiceMail "{mailbox},u"')
-        else:
-            agi_send('EXEC Playback "vm-nobodyavail"')
+                agi_send('EXEC Playback "vm-nobodyavail"')
         hangup()
         return
 
