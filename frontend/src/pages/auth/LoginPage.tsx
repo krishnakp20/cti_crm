@@ -97,20 +97,6 @@ export default function LoginPage() {
         </Link>
       </p>
 
-      {/* Demo credentials */}
-      <div className="mt-2 rounded-xl p-4 space-y-2" style={{ background: '#f0f6fa', border: '1px solid #d0e5ef' }}>
-        <p className="text-2xs font-bold text-gray-500 uppercase tracking-wider mb-2">Demo Credentials</p>
-        {[
-          { role: 'System Admin', email: 'admin@cti-crm.com', pass: 'Admin@123' },
-          { role: 'Client Admin', email: 'admin@sheeshagreen.com', pass: 'Admin@123' },
-          { role: 'Agent', email: 'pankhuri@sheeshagreen.com', pass: 'Agent@123' },
-        ].map(c => (
-          <div key={c.email} className="flex items-center gap-2">
-            <span className="text-2xs font-semibold text-gray-500 w-24 flex-shrink-0">{c.role}</span>
-            <span className="text-2xs font-mono text-gray-700 truncate">{c.email} / {c.pass}</span>
-          </div>
-        ))}
-      </div>
     </form>
   )
 }
