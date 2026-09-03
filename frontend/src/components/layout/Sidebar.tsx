@@ -66,6 +66,7 @@ interface SidebarProps {
 export default function Sidebar({ onClose }: SidebarProps) {
   const collapsed = useSelector((s: RootState) => s.ui.sidebarCollapsed)
   const user = useSelector((s: RootState) => s.auth.user)
+  const agentOnCall = useSelector((s: RootState) => s.ui.agentOnCall)
   const dispatch = useDispatch()
   const navigate = useNavigate()
 
@@ -194,6 +195,14 @@ export default function Sidebar({ onClose }: SidebarProps) {
         </div>
       )}
 
+      {/* On-call lock banner */}
+      {agentOnCall && !collapsed && (
+        <div className="mx-2 mb-1 px-2 py-1.5 rounded-lg text-2xs font-medium text-center"
+          style={{ background: 'rgba(239,68,68,0.18)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.3)' }}>
+          🔴 On Call — navigation locked
+        </div>
+      )}
+
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
         {navGroups.map(group => {
@@ -209,27 +218,39 @@ export default function Sidebar({ onClose }: SidebarProps) {
                   {group.label}
                 </p>
               )}
-              {visibleItems.map(item => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={(item as any).exact}
-                  className={({ isActive }) =>
-                    cn('sidebar-item', isActive && 'sidebar-item-active', collapsed && 'justify-center px-2')
-                  }
-                  title={collapsed ? item.label : undefined}
-                >
-                  {({ isActive }) => (
-                    <>
-                      <item.icon className={cn('w-4 h-4 flex-shrink-0', isActive ? 'text-gold-400' : '')} />
-                      {!collapsed && <span className="truncate">{item.label}</span>}
-                      {!collapsed && isActive && (
-                        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-gold-400 flex-shrink-0" />
-                      )}
-                    </>
-                  )}
-                </NavLink>
-              ))}
+              {visibleItems.map(item => {
+                const locked = agentOnCall && item.to !== '/agent'
+                return locked ? (
+                  <div
+                    key={item.to}
+                    className={cn('sidebar-item opacity-40 cursor-not-allowed', collapsed && 'justify-center px-2')}
+                    title={collapsed ? item.label : 'End your call before navigating'}
+                  >
+                    <item.icon className="w-4 h-4 flex-shrink-0" />
+                    {!collapsed && <span className="truncate">{item.label}</span>}
+                  </div>
+                ) : (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={(item as any).exact}
+                    className={({ isActive }) =>
+                      cn('sidebar-item', isActive && 'sidebar-item-active', collapsed && 'justify-center px-2')
+                    }
+                    title={collapsed ? item.label : undefined}
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <item.icon className={cn('w-4 h-4 flex-shrink-0', isActive ? 'text-gold-400' : '')} />
+                        {!collapsed && <span className="truncate">{item.label}</span>}
+                        {!collapsed && isActive && (
+                          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-gold-400 flex-shrink-0" />
+                        )}
+                      </>
+                    )}
+                  </NavLink>
+                )
+              })}
             </div>
           )
         })}

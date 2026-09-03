@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { callsApi, ticketsApi } from '../services/api'
-import { useSelector } from 'react-redux'
+import { useSelector, useDispatch } from 'react-redux'
 import { RootState } from '../redux/store'
+import { setAgentOnCall } from '../redux/slices/uiSlice'
 import {
   Phone, Ticket, Calendar, PhoneCall, X, Settings,
   Wifi, WifiOff, FileText, Save, ExternalLink, AlertCircle, CheckCircle2,
@@ -353,8 +354,23 @@ export default function AgentPage() {
   const token = useSelector((s: RootState) => s.auth.accessToken)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const dispatch = useDispatch()
 
   const [activeCall, setActiveCall] = useState<IncomingCall | null>(null)
+
+  // Keep Redux in sync so Sidebar can lock navigation during active call
+  const setActiveCallWithSync = useCallback((call: IncomingCall | null | ((prev: IncomingCall | null) => IncomingCall | null)) => {
+    if (typeof call === 'function') {
+      setActiveCall(prev => {
+        const next = call(prev)
+        dispatch(setAgentOnCall(next !== null))
+        return next
+      })
+    } else {
+      setActiveCall(call)
+      dispatch(setAgentOnCall(call !== null))
+    }
+  }, [dispatch])
   const agentEndedCallRef = useRef(false)  // true when agent clicked End Call — suppress duplicate wrap-up from JsSIP ended event
   const [callTimer, setCallTimer] = useState(0)
   const [formValues, setFormValues] = useState<Record<string, any>>({})
@@ -439,13 +455,13 @@ export default function AgentPage() {
     setCallTags([])
     setDisposition('')
     setCallSummary('')
-    setActiveCall(resolvedCall)
+    setActiveCallWithSync(resolvedCall)
   }, [])
 
   // When AMI AgentConnect fires, replace the webrtc- placeholder uniqueid with the
   // real Asterisk uniqueid so ticket save can do an exact match — no fallback needed.
   const handleAgentConnect = useCallback((uniqueid: string, callerNumber: string) => {
-    setActiveCall(prev => {
+    setActiveCallWithSync(prev => {
       if (!prev) return prev
       // Match by caller number in case call_arrive already set caller_id
       if (prev.caller_id === callerNumber || prev.uniqueid.startsWith('webrtc-')) {
@@ -482,7 +498,7 @@ export default function AgentPage() {
       return
     }
     // Call ended from remote side — trigger wrap-up
-    setActiveCall(prev => {
+    setActiveCallWithSync(prev => {
       if (prev) {
         setWrapup({ call: prev, formValues })
         setWrapupDisposition('')
@@ -574,7 +590,7 @@ export default function AgentPage() {
       await ticketsApi.create(buildPayload(activeCall, formValues, disposition, callSummary, callTags))
       queryClient.invalidateQueries({ queryKey: ['agent-tickets'] })
       toast.success('Ticket created!')
-      setActiveCall(null)
+      setActiveCallWithSync(null)
     } catch (e: any) {
       toast.error(e?.response?.data?.detail || 'Failed to create ticket')
     }
@@ -593,7 +609,7 @@ export default function AgentPage() {
     setWrapupDisposition(disposition)
     setWrapupSummary(callSummary)
     setWrapupTags([...callTags])
-    setActiveCall(null)
+    setActiveCallWithSync(null)
   }
 
   // Submit wrap-up
@@ -691,7 +707,7 @@ export default function AgentPage() {
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => setActiveCall(null)}
+                onClick={() => setActiveCallWithSync(null)}
                 className="flex-1 px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
                 Dismiss Call
