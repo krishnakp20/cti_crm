@@ -33,6 +33,8 @@ interface IncomingCall {
   uniqueid: string
   caller_id: string
   caller_name: string
+  queue?: string
+  department?: string
   campaign_id?: number
   customer?: { name?: string; email?: string; city?: string }
   form?: {
@@ -882,6 +884,11 @@ export default function AgentPage() {
                 <p className="text-sm font-bold text-gray-900 dark:text-white">{activeCall.caller_name || 'Unknown Caller'}</p>
                 <p className="text-xs text-gray-500">{activeCall.caller_id}</p>
               </div>
+              {(activeCall.queue || activeCall.department) && (
+                <span className="ml-3 px-2 py-0.5 rounded-full text-2xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                  {activeCall.queue || activeCall.department}
+                </span>
+              )}
               <div className="text-lg font-mono font-bold text-red-600 ml-4">{formatTime(callTimer)}</div>
             </div>
             <div className="flex items-center gap-2">

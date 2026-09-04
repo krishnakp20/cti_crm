@@ -25,6 +25,7 @@ class AMIClient:
         self._listeners: list = []          # async callables
         self._active_calls: dict = {}       # uniqueid → call state
         self._queue_callers: dict = {}      # uniqueid → queue entry time
+        self._ivr_vars: dict = {}           # uniqueid → {ivr_selection, ivr_department}
 
     def add_listener(self, fn):
         self._listeners.append(fn)
@@ -140,6 +141,7 @@ class AMIClient:
         elif event == "Hangup":
             call = self._active_calls.pop(uid, None)
             self._queue_callers.pop(uid, None)
+            self._ivr_vars.pop(uid, None)
             if call:
                 if call.get("answered"):
                     answer_time = call.get("answer_time", call["start"])
@@ -157,16 +159,26 @@ class AMIClient:
                     await self._broadcast({"type": "call_abandoned", "uniqueid": uid})
                     await self._save_cdr_abandoned(uid, pkt)
 
+        elif event == "VarSet":
+            var = pkt.get("Variable", "")
+            val = pkt.get("Value", "")
+            if var == "IVR_SELECTION" and uid:
+                self._ivr_vars.setdefault(uid, {})["ivr_selection"] = val
+            elif var == "IVR_DEPARTMENT" and uid:
+                self._ivr_vars.setdefault(uid, {})["ivr_department"] = val
+
         # Queue-based events
         elif event == "QueueCallerJoin":
             caller = pkt.get("CallerIDNum", "")
             queue = pkt.get("Queue", "")
+            ivr = self._ivr_vars.get(uid, {})
             self._queue_callers[uid] = {
                 "caller": caller,
                 "queue": queue,
                 "department": _queue_to_dept(queue),
                 "position": pkt.get("Position", "1"),
                 "time": datetime.now(),
+                "ivr_selection": ivr.get("ivr_selection", ""),
             }
             await self._broadcast({
                 "type": "queue_join",
@@ -289,6 +301,7 @@ class AMIClient:
                     any_user = (await db.execute(select(User).where(User.extension.isnot(None), User.client_id.isnot(None)).limit(1))).scalar_one_or_none()
                     if any_user:
                         client_id = any_user.client_id
+                    ivr = self._ivr_vars.get(uid, {})
                     db.add(CallRecord(
                         asterisk_unique_id=uid,
                         caller_number=pkt.get("CallerIDNum", ""),
@@ -297,6 +310,7 @@ class AMIClient:
                         queue_start_time=datetime.now(),
                         call_status="queued",
                         client_id=client_id,
+                        ivr_selection=ivr.get("ivr_selection") or None,
                     ))
                     await db.commit()
         except Exception as e:
@@ -328,6 +342,9 @@ class AMIClient:
                 rec.agent_extension = agent_ext
                 rec.queue_name = pkt.get("Queue", call.get("department", ""))
                 rec.department = call.get("department") or _queue_to_dept(pkt.get("Queue", ""))
+                if not rec.ivr_selection:
+                    ivr = self._ivr_vars.get(uid, {})
+                    rec.ivr_selection = ivr.get("ivr_selection") or None
 
                 if rec.queue_start_time:
                     qs = rec.queue_start_time.replace(tzinfo=None)
