@@ -229,6 +229,7 @@ class AMIClient:
                 "agent": agent_name,
                 "caller": caller,
                 "department": dept,
+                "queue": queue,
                 "timestamp": datetime.now().isoformat(),
             })
             # Send call_arrive to the agent's browser so the Agent Panel pops up

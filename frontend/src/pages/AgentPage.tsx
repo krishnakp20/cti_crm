@@ -57,7 +57,7 @@ interface WrapupData {
 function useAgentWebSocket(
   token: string | null,
   onCallArrive: (call: IncomingCall) => void,
-  onAgentConnect: (uniqueid: string, callerNumber: string) => void,
+  onAgentConnect: (uniqueid: string, callerNumber: string, queue: string, department: string) => void,
 ) {
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
@@ -83,7 +83,7 @@ function useAgentWebSocket(
         if (msg.type === 'call_arrive') onCallArrive(msg as IncomingCall)
         // AMI AgentConnect fires when agent picks up — capture real Asterisk uniqueid
         if (msg.type === 'agent_connect' && msg.uniqueid) {
-          onAgentConnect(msg.uniqueid, msg.caller || msg.caller_id || '')
+          onAgentConnect(msg.uniqueid, msg.caller || msg.caller_id || '', msg.queue || '', msg.department || '')
         }
       } catch { /* ignore */ }
     }
@@ -462,12 +462,11 @@ export default function AgentPage() {
 
   // When AMI AgentConnect fires, replace the webrtc- placeholder uniqueid with the
   // real Asterisk uniqueid so ticket save can do an exact match — no fallback needed.
-  const handleAgentConnect = useCallback((uniqueid: string, callerNumber: string) => {
+  const handleAgentConnect = useCallback((uniqueid: string, callerNumber: string, queue: string, department: string) => {
     setActiveCallWithSync(prev => {
       if (!prev) return prev
-      // Match by caller number in case call_arrive already set caller_id
       if (prev.caller_id === callerNumber || prev.uniqueid.startsWith('webrtc-')) {
-        return { ...prev, uniqueid }
+        return { ...prev, uniqueid, ...(queue && { queue }), ...(department && { department }) }
       }
       return prev
     })
