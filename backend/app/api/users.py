@@ -226,6 +226,7 @@ class DialerSettingsRequest(BaseModel):
     agent_mobile: Optional[str] = None
     sip_server_url: Optional[str] = None
     sip_password: Optional[str] = None
+    answer_mode: Optional[str] = None  # "direct" or "ring"
 
 
 @router.patch("/me/dialer-settings")

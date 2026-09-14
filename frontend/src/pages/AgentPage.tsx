@@ -157,15 +157,22 @@ interface SipConfig {
   domain: string    // e.g. "192.168.10.30"
 }
 
-function useWebRTCSoftphone(config: SipConfig | null, onIncomingCall?: (callerId: string, callerName: string) => void, onCallEnded?: () => void) {
+function useWebRTCSoftphone(
+  config: SipConfig | null,
+  answerMode: 'direct' | 'ring',
+  onIncomingCall?: (callerId: string, callerName: string) => void,
+  onCallEnded?: () => void,
+) {
   const [status, setStatus] = useState<SipStatus>('idle')
   const [callSession, setCallSession] = useState<any>(null)
   const uaRef = useRef<any>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const onIncomingCallRef = useRef(onIncomingCall)
   const onCallEndedRef = useRef(onCallEnded)
+  const answerModeRef = useRef(answerMode)
   onIncomingCallRef.current = onIncomingCall
   onCallEndedRef.current = onCallEnded
+  answerModeRef.current = answerMode
 
   useEffect(() => {
     if (!config) return
@@ -220,15 +227,17 @@ function useWebRTCSoftphone(config: SipConfig | null, onIncomingCall?: (callerId
         }
       })
 
-      // Auto-answer after brief delay (ViciDial expects auto-answer)
-      setTimeout(() => {
-        if (session.status !== session.C?.STATUS_TERMINATED) {
-          session.answer({
-            mediaConstraints: { audio: true, video: false },
-            pcConfig: { iceServers: [] },
-          })
-        }
-      }, 400)
+      // Auto-answer only in direct mode; ring mode waits for agent to click Accept
+      if (answerModeRef.current === 'direct') {
+        setTimeout(() => {
+          if (session.status !== session.C?.STATUS_TERMINATED) {
+            session.answer({
+              mediaConstraints: { audio: true, video: false },
+              pcConfig: { iceServers: [] },
+            })
+          }
+        }, 400)
+      }
     })
 
     ua.start()
@@ -243,7 +252,22 @@ function useWebRTCSoftphone(config: SipConfig | null, onIncomingCall?: (callerId
     }
   }, [callSession])
 
-  return { status, hangup }
+  const answerCall = useCallback(() => {
+    if (callSession && callSession.status !== callSession.C?.STATUS_TERMINATED) {
+      callSession.answer({
+        mediaConstraints: { audio: true, video: false },
+        pcConfig: { iceServers: [] },
+      })
+    }
+  }, [callSession])
+
+  const rejectCall = useCallback(() => {
+    if (callSession) {
+      try { callSession.terminate({ status_code: 486, reason_phrase: 'Busy Here' }) } catch { /* ignore */ }
+    }
+  }, [callSession])
+
+  return { status, hangup, answerCall, rejectCall }
 }
 
 // ── Softphone status badge ────────────────────────────────────────────────────
@@ -392,6 +416,7 @@ export default function AgentPage() {
   const [sipPassword, setSipPassword] = useState('')
   const [sipServerUrl, setSipServerUrl] = useState('')
   const [connectionType, setConnectionType] = useState<'remote' | 'webrtc'>('remote')
+  const [answerMode, setAnswerMode] = useState<'direct' | 'ring'>('direct')
   const [agentMobile, setAgentMobile] = useState('')
   const [dialerUser, setDialerUser] = useState('')
   const [saving, setSaving] = useState(false)
@@ -404,6 +429,7 @@ export default function AgentPage() {
     // Load SIP / connection settings from auth profile
     api.get('/auth/me').then(r => {
       setConnectionType(r.data.connection_type || 'remote')
+      setAnswerMode(r.data.answer_mode || 'direct')
       setAgentMobile(r.data.agent_mobile || '')
       setSipServerUrl(r.data.sip_server_url || '')
       setSipPassword(r.data.sip_password || '')
@@ -511,8 +537,42 @@ export default function AgentPage() {
     })
   }, [formValues, callSummary, callTags])
 
-  const { status: sipStatus, hangup: sipHangup } = useWebRTCSoftphone(sipConfig, handleWebRTCIncoming, handleWebRTCEnded)
+  const { status: sipStatus, hangup: sipHangup, answerCall: sipAnswer, rejectCall: sipReject } = useWebRTCSoftphone(sipConfig, answerMode, handleWebRTCIncoming, handleWebRTCEnded)
   const { micState, request: requestMic } = useMicrophonePermission()
+
+  // Ringtone for ring mode
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null)
+  useEffect(() => {
+    if (answerMode === 'ring' && sipStatus === 'ringing') {
+      if (!ringtoneRef.current) {
+        // Use browser built-in via oscillator — no external file needed
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const beep = () => {
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination)
+          osc.frequency.value = 480; osc.type = 'sine'
+          gain.gain.setValueAtTime(0.3, ctx.currentTime)
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1)
+          osc.start(); osc.stop(ctx.currentTime + 1)
+        }
+        beep()
+        const interval = setInterval(beep, 2000)
+        ;(ringtoneRef as any).current = { stop: () => { clearInterval(interval); ctx.close() } }
+      }
+    } else {
+      if (ringtoneRef.current) {
+        ;(ringtoneRef.current as any).stop?.()
+        ringtoneRef.current = null
+      }
+    }
+    return () => {
+      if (ringtoneRef.current) {
+        ;(ringtoneRef.current as any).stop?.()
+        ringtoneRef.current = null
+      }
+    }
+  }, [answerMode, sipStatus])
 
   const { data: tickets } = useQuery({
     queryKey: ['agent-tickets'],
@@ -551,6 +611,7 @@ export default function AgentPage() {
         agent_mobile: agentMobile || null,
         sip_server_url: sipServerUrl || null,
         sip_password: sipPassword || null,
+        answer_mode: answerMode,
       }).catch(() => {}),
     ])
     setSaving(false)
@@ -683,6 +744,55 @@ export default function AgentPage() {
               Reload after fixing
             </button>
           )}
+        </div>
+      )}
+
+      {/* ── RING MODE INCOMING CALL OVERLAY ──────────────────────────────── */}
+      {activeCall && answerMode === 'ring' && sipStatus === 'ringing' && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center space-y-5">
+            {/* Animated ring */}
+            <div className="relative mx-auto w-24 h-24">
+              <div className="absolute inset-0 rounded-full bg-green-100 dark:bg-green-900/30 animate-ping opacity-60" />
+              <div className="absolute inset-2 rounded-full bg-green-200 dark:bg-green-900/50 animate-ping opacity-40" style={{ animationDelay: '0.15s' }} />
+              <div className="relative w-24 h-24 rounded-full bg-green-500 flex items-center justify-center">
+                <Phone className="w-10 h-10 text-white" />
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Incoming Call</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-white">{activeCall.caller_name || 'Unknown Caller'}</p>
+              <p className="text-sm text-gray-500 mt-0.5">{activeCall.caller_id}</p>
+              {(activeCall.queue || activeCall.department) && (
+                <span className="inline-block mt-2 px-3 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                  {activeCall.queue || activeCall.department}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-4 justify-center pt-1">
+              <button
+                onClick={() => {
+                  sipReject()
+                  setActiveCallWithSync(null)
+                }}
+                className="flex flex-col items-center gap-1.5 group"
+              >
+                <div className="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center group-hover:bg-red-200 transition-colors">
+                  <X className="w-6 h-6 text-red-600" />
+                </div>
+                <span className="text-xs text-gray-500">Decline</span>
+              </button>
+              <button
+                onClick={() => sipAnswer()}
+                className="flex flex-col items-center gap-1.5 group"
+              >
+                <div className="w-14 h-14 rounded-full bg-green-500 flex items-center justify-center group-hover:bg-green-600 transition-colors animate-bounce">
+                  <Phone className="w-6 h-6 text-white" />
+                </div>
+                <span className="text-xs font-semibold text-green-600">Accept</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1103,14 +1213,33 @@ export default function AgentPage() {
                 {sipStatus === 'registered' && (
                   <p className="text-xs text-green-600 mb-3">✓ Registered — browser is ready to receive calls.</p>
                 )}
+
+                {/* Answer mode toggle */}
+                <label className="label mt-1">Answer Mode</label>
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  {(['direct', 'ring'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setAnswerMode(mode)}
+                      className={cn(
+                        'flex flex-col items-center gap-1 px-3 py-2.5 rounded-lg border text-xs font-medium transition-colors',
+                        answerMode === mode
+                          ? 'bg-primary-50 border-primary-400 text-primary-700 dark:bg-primary-900/20 dark:border-primary-600 dark:text-primary-300'
+                          : 'border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
+                      )}
+                    >
+                      {mode === 'direct' ? <Headphones className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
+                      <span className="capitalize">{mode === 'direct' ? 'Direct (auto-answer)' : 'Ring (manual pick up)'}</span>
+                    </button>
+                  ))}
+                </div>
               </>
             )}
 
             <div className="flex gap-2 justify-end">
               <button className="btn-secondary btn-sm" onClick={() => setShowExtModal(false)}>Cancel</button>
-              {connectionType === 'remote' && (
-                <button className="btn-primary btn-sm" onClick={saveExtension} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
-              )}
+              <button className="btn-primary btn-sm" onClick={saveExtension} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
         </div>

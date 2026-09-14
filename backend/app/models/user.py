@@ -44,6 +44,7 @@ class User(Base):
     agent_mobile: Mapped[Optional[str]] = mapped_column(String(30))  # for remote mode
     sip_password: Mapped[Optional[str]] = mapped_column(String(255))  # for webrtc mode
     sip_server_url: Mapped[Optional[str]] = mapped_column(String(500))  # e.g. wss://192.168.10.30:8089/ws
+    answer_mode: Mapped[str] = mapped_column(String(20), default="direct")  # "direct" or "ring"
 
     client: Mapped[Optional["Client"]] = relationship("Client", back_populates="users", foreign_keys=[client_id])
     department: Mapped[Optional["Department"]] = relationship("Department", back_populates="users", foreign_keys=[department_id])

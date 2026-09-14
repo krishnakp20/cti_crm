@@ -198,4 +198,5 @@ async def me(current_user: User = Depends(get_current_user), db: AsyncSession = 
         "agent_mobile": current_user.agent_mobile,
         "sip_server_url": current_user.sip_server_url,
         "sip_password": current_user.sip_password,
+        "answer_mode": current_user.answer_mode or "direct",
     }
