@@ -99,10 +99,13 @@ export const formsApi = {
 export const callsApi = {
   listCampaigns: (params?: any) => api.get('/calls/campaigns', { params }),
   createCampaign: (data: any) => api.post('/calls/campaigns', data),
-  uploadData: (campaignId: number, file: File) => {
+  uploadData: (campaignId: number, file: File, mobileField?: string, nameField?: string) => {
     const fd = new FormData()
     fd.append('file', file)
-    return api.post(`/calls/campaigns/${campaignId}/upload`, fd)
+    const params: any = {}
+    if (mobileField) params.mobile_field = mobileField
+    if (nameField) params.name_field = nameField
+    return api.post(`/calls/campaigns/${campaignId}/upload`, fd, { params })
   },
   listLogs: (params?: any) => api.get('/calls/logs', { params }),
   createLog: (data: any) => api.post('/calls/logs', data),

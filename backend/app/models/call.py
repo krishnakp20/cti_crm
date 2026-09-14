@@ -43,6 +43,9 @@ class Campaign(Base):
     status: Mapped[CampaignStatus] = mapped_column(Enum(CampaignStatus), default=CampaignStatus.DRAFT)
     dialer_campaign_id: Mapped[Optional[str]] = mapped_column(String(100))
     settings: Mapped[Optional[dict]] = mapped_column(JSON)
+    contact_fields: Mapped[Optional[list]] = mapped_column(JSON)  # CSV column names e.g. ["city","product"]
+    mobile_field: Mapped[Optional[str]] = mapped_column(String(100))   # which CSV col = mobile
+    name_field: Mapped[Optional[str]] = mapped_column(String(100))     # which CSV col = name
     start_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))

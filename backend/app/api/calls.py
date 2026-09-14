@@ -60,15 +60,54 @@ async def create_campaign(req: CampaignCreate, current_user: User = Depends(get_
     return campaign
 
 
+MOBILE_HINTS = {"mobile", "phone", "number", "contact", "cell", "mob", "phoneno", "phone_no", "mobileno"}
+NAME_HINTS   = {"name", "full_name", "customer_name", "contact_name", "cust_name", "fullname"}
+
+def _detect_field(columns: list[str], hints: set) -> str | None:
+    for col in columns:
+        if col.lower().strip().replace(" ", "_") in hints:
+            return col
+    return None
+
+
+@router.post("/campaigns/{campaign_id}/preview")
+async def preview_csv(
+    campaign_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Parse CSV headers + first 5 rows for admin confirmation before import."""
+    import io
+    import pandas as pd
+    content = await file.read()
+    try:
+        df = pd.read_csv(io.BytesIO(content)) if file.filename.lower().endswith(".csv") else pd.read_excel(io.BytesIO(content))
+    except Exception as e:
+        raise HTTPException(400, f"Cannot parse file: {e}")
+    cols = list(df.columns)
+    preview = df.head(5).fillna("").astype(str).to_dict(orient="records")
+    return {
+        "columns": cols,
+        "detected_mobile": _detect_field(cols, MOBILE_HINTS),
+        "detected_name": _detect_field(cols, NAME_HINTS),
+        "preview_rows": preview,
+        "total_rows": len(df),
+        "filename": file.filename,
+        # Send raw bytes b64 so frontend can re-send without re-selecting file
+        "file_b64": __import__("base64").b64encode(content).decode(),
+    }
+
+
 @router.post("/campaigns/{campaign_id}/upload")
 async def upload_calling_data(
     campaign_id: int,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = BackgroundTasks(),
+    mobile_field: str = Query("mobile"),
+    name_field: str = Query("name"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    import io
+    import io, pandas as pd
     content = await file.read()
 
     batch = UploadBatch(
@@ -83,27 +122,37 @@ async def upload_calling_data(
     await db.flush()
 
     try:
-        import pandas as pd
-        df = pd.read_csv(io.BytesIO(content)) if file.filename.endswith(".csv") else pd.read_excel(io.BytesIO(content))
-        records = []
+        df = pd.read_csv(io.BytesIO(content)) if file.filename.lower().endswith(".csv") else pd.read_excel(io.BytesIO(content))
+        df = df.fillna("").astype(str)
+        cols = list(df.columns)
+        # Store contact_fields on campaign (exclude mobile/name cols)
+        extra_cols = [c for c in cols if c not in (mobile_field, name_field)]
+        await db.execute(
+            update(Campaign).where(Campaign.id == campaign_id).values(
+                contact_fields=extra_cols,
+                mobile_field=mobile_field,
+                name_field=name_field,
+            )
+        )
+        skipped = 0
         for _, row in df.iterrows():
+            mobile = row.get(mobile_field, "").strip()
+            if not mobile:
+                skipped += 1
+                continue
+            # store all other columns in extra_data
+            extra = {c: row.get(c, "") for c in extra_cols if row.get(c, "")}
             record = UploadRecord(
                 batch_id=batch.id,
                 client_id=current_user.client_id,
                 campaign_id=campaign_id,
-                name=str(row.get("name", row.get("Name", ""))),
-                mobile=str(row.get("mobile", row.get("Mobile", row.get("phone", "")))),
-                alternate_mobile=str(row.get("alternate_mobile", "")) or None,
-                email=str(row.get("email", "")) or None,
-                city=str(row.get("city", "")) or None,
-                state=str(row.get("state", "")) or None,
-                priority=int(row.get("priority", 0)),
-                remarks=str(row.get("remarks", "")) or None,
+                name=row.get(name_field, "").strip() or mobile,
+                mobile=mobile,
+                extra_data=extra if extra else None,
             )
-            records.append(record)
             db.add(record)
 
-        batch.total_records = len(records)
+        batch.total_records = len(df) - skipped
         batch.status = "completed"
         batch.completed_at = datetime.utcnow()
     except Exception as e:
@@ -111,12 +160,6 @@ async def upload_calling_data(
         batch.error_log = str(e)
 
     await db.commit()
-
-    result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
-    campaign = result.scalar_one_or_none()
-    if campaign and campaign.campaign_type == CampaignType.PREDICTIVE:
-        background_tasks.add_task(push_to_dialer, campaign_id, batch.id)
-
     return {"batch_id": batch.id, "total": batch.total_records, "status": batch.status}
 
 
@@ -443,3 +486,229 @@ async def set_extension(
 
 async def push_to_dialer(campaign_id: int, batch_id: int):
     pass
+
+
+# ── Campaign Contacts (Manual Dialer) ─────────────────────────────────────────
+
+@router.get("/campaigns/{campaign_id}/contacts")
+async def list_contacts(
+    campaign_id: int,
+    status: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(UploadRecord).where(
+        UploadRecord.campaign_id == campaign_id,
+        UploadRecord.client_id == current_user.client_id,
+    )
+    if status:
+        q = q.where(UploadRecord.call_status == status)
+    # Callbacks first, then pending, then called
+    from sqlalchemy import case
+    q = q.order_by(
+        case(
+            (UploadRecord.call_status == "callback", 0),
+            (UploadRecord.call_status == "pending", 1),
+            else_=2,
+        ),
+        UploadRecord.created_at,
+    )
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
+    result = await db.execute(q.offset((page - 1) * limit).limit(limit))
+    contacts = result.scalars().all()
+
+    # Also return campaign field names
+    camp = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
+
+    return {
+        "total": total,
+        "contact_fields": camp.contact_fields if camp else [],
+        "items": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "mobile": c.mobile,
+                "status": c.call_status,
+                "call_count": c.call_count,
+                "last_called_at": c.last_called_at.isoformat() if c.last_called_at else None,
+                "extra_data": c.extra_data or {},
+                "remarks": c.remarks,
+            }
+            for c in contacts
+        ],
+    }
+
+
+class ContactStatusUpdate(BaseModel):
+    status: str  # pending | called | callback | dnc | failed
+    remarks: Optional[str] = None
+    callback_at: Optional[datetime] = None
+
+
+@router.patch("/campaigns/{campaign_id}/contacts/{contact_id}")
+async def update_contact_status(
+    campaign_id: int,
+    contact_id: int,
+    req: ContactStatusUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rec = (await db.execute(
+        select(UploadRecord).where(
+            UploadRecord.id == contact_id,
+            UploadRecord.campaign_id == campaign_id,
+            UploadRecord.client_id == current_user.client_id,
+        )
+    )).scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "Contact not found")
+    rec.call_status = req.status
+    rec.call_count = (rec.call_count or 0) + 1
+    rec.last_called_at = datetime.utcnow()
+    if req.remarks:
+        rec.remarks = req.remarks
+    await db.commit()
+    return {"status": "ok"}
+
+
+# ── AMI Originate (outbound click-to-call) ───────────────────────────────────
+
+class OriginateRequest(BaseModel):
+    contact_id: int
+    campaign_id: int
+    destination: str    # customer mobile number
+    caller_id: Optional[str] = None  # override caller ID shown to customer
+
+
+@router.post("/originate")
+async def originate_call(
+    req: OriginateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Agent clicks Dial → Asterisk originates a call:
+    1. Rings agent's WebRTC extension
+    2. When agent answers → Asterisk dials customer number
+    """
+    from app.services.ami import ami_client
+    from app.models.cdr import CallRecord
+
+    ext = current_user.extension
+    if not ext:
+        raise HTTPException(400, "No extension configured. Set it in Agent Panel settings.")
+
+    # Normalize destination
+    dest = req.destination.strip().replace(" ", "").replace("-", "")
+    if not dest:
+        raise HTTPException(400, "Invalid destination number")
+
+    # Fetch contact for pre-fill data
+    contact = (await db.execute(
+        select(UploadRecord).where(UploadRecord.id == req.contact_id)
+    )).scalar_one_or_none()
+
+    # Unique call ID
+    import time, uuid
+    call_uid = f"ob-{int(time.time())}-{uuid.uuid4().hex[:6]}"
+    caller_id_num = req.caller_id or ext
+
+    # AMI Originate — send as raw lines so multiple Variable: headers work
+    ami_lines = (
+        f"Action: Originate\r\n"
+        f"Channel: PJSIP/{ext}\r\n"
+        f"Context: from-internal\r\n"
+        f"Exten: {dest}\r\n"
+        f"Priority: 1\r\n"
+        f"Timeout: 30000\r\n"
+        f'CallerID: "{current_user.full_name}" <{caller_id_num}>\r\n'
+        f"Variable: OUTBOUND_AGENT={ext}\r\n"
+        f"Variable: OUTBOUND_CONTACT={req.contact_id}\r\n"
+        f"Variable: OUTBOUND_CAMPAIGN={req.campaign_id}\r\n"
+        f"ActionID: {call_uid}\r\n"
+        f"Async: true\r\n"
+        f"\r\n"
+    )
+    if ami_client._connected and ami_client.writer:
+        ami_client.writer.write(ami_lines.encode())
+        await ami_client.writer.drain()
+
+    # Create outbound CDR row
+    cdr = CallRecord(
+        asterisk_unique_id=call_uid,
+        caller_number=dest,
+        agent_id=current_user.id,
+        agent_name=current_user.full_name,
+        agent_extension=ext,
+        direction="outbound",
+        campaign_id=req.campaign_id,
+        upload_record_id=req.contact_id,
+        call_status="initiated",
+        call_start_time=datetime.utcnow(),
+        client_id=current_user.client_id,
+    )
+    db.add(cdr)
+
+    # Mark contact as being called
+    if contact:
+        contact.call_count = (contact.call_count or 0) + 1
+        contact.last_called_at = datetime.utcnow()
+        contact.call_status = "called"
+
+    await db.commit()
+
+    # Push call_arrive to agent's own browser so the form pops up
+    from app.websocket.manager import manager
+    contact_data = {}
+    if contact:
+        contact_data = {
+            "name": contact.name,
+            "mobile": contact.mobile,
+            **(contact.extra_data or {}),
+        }
+
+    # Load agent's form
+    form_data = None
+    if current_user.client_id:
+        from app.models.form import Form, FormField
+        form = (await db.execute(
+            select(Form).where(Form.client_id == current_user.client_id, Form.is_active == True)
+            .order_by(Form.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if form:
+            fields = (await db.execute(
+                select(FormField).where(FormField.form_id == form.id).order_by(FormField.order)
+            )).scalars().all()
+            form_data = {
+                "id": form.id, "name": form.name,
+                "fields": [
+                    {"id": f.id, "label": f.label, "field_name": f.field_name,
+                     "field_type": f.field_type.value if hasattr(f.field_type, "value") else str(f.field_type),
+                     "placeholder": f.placeholder, "options": f.options,
+                     "is_required": f.is_required, "order": f.order}
+                    for f in fields
+                ],
+            }
+
+    campaign_contact_fields = []
+    if contact and contact.extra_data:
+        campaign_contact_fields = [
+            {"key": k, "value": v} for k, v in contact.extra_data.items() if v
+        ]
+
+    await manager.send_to_user(current_user.id, {
+        "type": "call_arrive",
+        "uniqueid": call_uid,
+        "caller_id": dest,
+        "caller_name": contact.name if contact else dest,
+        "direction": "outbound",
+        "campaign_id": req.campaign_id,
+        "contact_id": req.contact_id,
+        "campaign_contact_fields": campaign_contact_fields,
+        "customer": {"name": contact.name if contact else "", "mobile": dest},
+        "form": form_data,
+    })
+
+    return {"status": "ok", "call_uid": call_uid}

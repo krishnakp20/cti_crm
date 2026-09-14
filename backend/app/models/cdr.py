@@ -46,6 +46,11 @@ class CallRecord(Base):
     call_summary: Mapped[Optional[str]] = mapped_column(Text)
     tags: Mapped[Optional[list]] = mapped_column(JSON)
 
+    # Call direction + campaign
+    direction: Mapped[str] = mapped_column(String(20), default="inbound")  # inbound | outbound
+    campaign_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("campaigns.id"), index=True)
+    upload_record_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("upload_records.id"), index=True)
+
     # Linked ticket
     ticket_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("tickets.id"))
 

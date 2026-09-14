@@ -8,7 +8,7 @@ import { setAgentOnCall } from '../redux/slices/uiSlice'
 import {
   Phone, Ticket, Calendar, PhoneCall, X, Settings,
   Wifi, WifiOff, FileText, Save, ExternalLink, AlertCircle, CheckCircle2,
-  Headphones, Radio, Mic, MicOff, ShieldAlert,
+  Headphones, Radio, Mic, MicOff, ShieldAlert, PhoneOutgoing, Users, ChevronRight, RefreshCw,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn, formatLabel } from '../utils/cn'
@@ -35,7 +35,10 @@ interface IncomingCall {
   caller_name: string
   queue?: string
   department?: string
+  direction?: 'inbound' | 'outbound'
   campaign_id?: number
+  contact_id?: number
+  campaign_contact_fields?: Array<{ key: string; value: string }>
   customer?: { name?: string; email?: string; city?: string }
   form?: {
     id: number
@@ -411,6 +414,17 @@ export default function AgentPage() {
   const [wrapupTags, setWrapupTags] = useState<string[]>([])
   const [dispRequired, setDispRequired] = useState(false)
 
+  // Campaign dialer
+  const [campaignList, setCampaignList] = useState<any[]>([])
+  const [selectedCampaign, setSelectedCampaign] = useState<number | null>(null)
+  const [campaignContacts, setCampaignContacts] = useState<any[]>([])
+  const [campaignTotal, setCampaignTotal] = useState(0)
+  const [campaignContactFields, setCampaignContactFields] = useState<string[]>([])
+  const [campaignPage, setCampaignPage] = useState(1)
+  const [campaignStatusFilter, setCampaignStatusFilter] = useState('')
+  const [dialingContactId, setDialingContactId] = useState<number | null>(null)
+  const [showCampaignTab, setShowCampaignTab] = useState(false)
+
   const [showExtModal, setShowExtModal] = useState(false)
   const [extension, setExtension] = useState('')
   const [sipPassword, setSipPassword] = useState('')
@@ -437,6 +451,46 @@ export default function AgentPage() {
       if (r.data.dialer_user) setDialerUser(r.data.dialer_user)
     }).catch(() => {})
   }, [])
+
+  // Load active campaigns for dialer tab
+  useEffect(() => {
+    api.get('/calls/campaigns', { params: { status: 'active', limit: 50 } }).then(r => {
+      const items = Array.isArray(r.data) ? r.data : (r.data?.items || [])
+      setCampaignList(items)
+      if (items.length > 0 && !selectedCampaign) setSelectedCampaign(items[0].id)
+    }).catch(() => {})
+  }, [])
+
+  const loadCampaignContacts = useCallback((campaignId: number, page = 1, status = '') => {
+    api.get(`/calls/campaigns/${campaignId}/contacts`, {
+      params: { page, limit: 30, ...(status ? { status } : {}) }
+    }).then(r => {
+      setCampaignContacts(r.data.items || [])
+      setCampaignTotal(r.data.total || 0)
+      setCampaignContactFields(r.data.contact_fields || [])
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (selectedCampaign) loadCampaignContacts(selectedCampaign, campaignPage, campaignStatusFilter)
+  }, [selectedCampaign, campaignPage, campaignStatusFilter])
+
+  const dialContact = useCallback(async (contact: any) => {
+    if (!selectedCampaign) return
+    setDialingContactId(contact.id)
+    try {
+      await api.post('/calls/originate', {
+        contact_id: contact.id,
+        campaign_id: selectedCampaign,
+        destination: contact.mobile,
+      })
+      toast.success(`Dialing ${contact.name || contact.mobile}…`)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || 'Failed to originate call')
+    } finally {
+      setDialingContactId(null)
+    }
+  }, [selectedCampaign])
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>
@@ -685,6 +739,20 @@ export default function AgentPage() {
     setSaving(true)
     try {
       await ticketsApi.create(buildPayload(wrapup.call, wrapup.formValues, wrapupDisposition, wrapupSummary, wrapupTags))
+      // For outbound campaign calls: update contact status
+      if (wrapup.call.direction === 'outbound' && wrapup.call.campaign_id && wrapup.call.contact_id) {
+        const statusMap: Record<string, string> = {
+          call_back_requested: 'callback', resolved: 'called', pending: 'called',
+          escalated: 'called', not_reachable: 'failed',
+        }
+        const contactStatus = statusMap[wrapupDisposition] || 'called'
+        await api.patch(
+          `/calls/campaigns/${wrapup.call.campaign_id}/contacts/${wrapup.call.contact_id}`,
+          { status: contactStatus, remarks: wrapupSummary }
+        ).catch(() => {})
+        // Refresh campaign contacts list
+        if (selectedCampaign) loadCampaignContacts(selectedCampaign, campaignPage, campaignStatusFilter)
+      }
       queryClient.invalidateQueries({ queryKey: ['agent-tickets'] })
       toast.success('Ticket saved — you are now available')
       setWrapup(null)
@@ -1036,6 +1104,21 @@ export default function AgentPage() {
               </div>
             </div>
 
+            {/* ─ CSV reference data (outbound calls) ─ */}
+            {activeCall.direction === 'outbound' && activeCall.campaign_contact_fields && activeCall.campaign_contact_fields.length > 0 && (
+              <div className="lg:col-span-2">
+                <SectionLabel><span className="flex items-center gap-1.5"><FileText className="w-3 h-3" />Campaign Data (read-only)</span></SectionLabel>
+                <div className="grid grid-cols-2 gap-2">
+                  {activeCall.campaign_contact_fields.map(({ key, value }) => (
+                    <div key={key} className="flex flex-col">
+                      <span className="text-2xs text-gray-400 uppercase tracking-wide">{key.replace(/_/g, ' ')}</span>
+                      <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{value || '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* ─ Dynamic form fields ─ */}
             {activeCall.form && activeCall.form.fields.filter(f =>
               !['customer_name','name','mobile','phone','email','customer_email','customer_mobile',
@@ -1093,6 +1176,131 @@ export default function AgentPage() {
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Campaign Dialer ───────────────────────────────────────────────────── */}
+      {campaignList.length > 0 && (
+        <div className="card">
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+            <button
+              onClick={() => setShowCampaignTab(v => !v)}
+              className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white"
+            >
+              <PhoneOutgoing className="w-4 h-4 text-purple-600" />
+              Campaign Dialer
+              <ChevronRight className={cn('w-4 h-4 text-gray-400 transition-transform', showCampaignTab && 'rotate-90')} />
+            </button>
+            <div className="flex items-center gap-2">
+              {/* Campaign selector */}
+              <select
+                className="input text-xs py-1 px-2 h-7"
+                value={selectedCampaign || ''}
+                onChange={e => { setSelectedCampaign(Number(e.target.value)); setCampaignPage(1) }}
+              >
+                {campaignList.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              {/* Status filter */}
+              <select
+                className="input text-xs py-1 px-2 h-7"
+                value={campaignStatusFilter}
+                onChange={e => { setCampaignStatusFilter(e.target.value); setCampaignPage(1) }}
+              >
+                <option value="">All</option>
+                <option value="pending">Pending</option>
+                <option value="callback">Callback</option>
+                <option value="called">Called</option>
+                <option value="dnc">DNC</option>
+              </select>
+              <button
+                onClick={() => selectedCampaign && loadCampaignContacts(selectedCampaign, campaignPage, campaignStatusFilter)}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-xs text-gray-400">{campaignTotal} contacts</span>
+            </div>
+          </div>
+
+          {showCampaignTab && (
+            <div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-800/50">
+                      <th className="text-left px-4 py-2 font-semibold text-gray-500">Name</th>
+                      <th className="text-left px-4 py-2 font-semibold text-gray-500">Mobile</th>
+                      {campaignContactFields.map(f => (
+                        <th key={f} className="text-left px-4 py-2 font-semibold text-gray-500 max-w-[120px] truncate">{f.replace(/_/g, ' ')}</th>
+                      ))}
+                      <th className="text-left px-4 py-2 font-semibold text-gray-500">Status</th>
+                      <th className="text-left px-4 py-2 font-semibold text-gray-500">Calls</th>
+                      <th className="text-right px-4 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                    {campaignContacts.length === 0 ? (
+                      <tr><td colSpan={6 + campaignContactFields.length} className="text-center py-8 text-gray-400">No contacts found</td></tr>
+                    ) : campaignContacts.map((c: any) => (
+                      <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                        <td className="px-4 py-2.5 font-medium text-gray-800 dark:text-gray-200">{c.name || '—'}</td>
+                        <td className="px-4 py-2.5 text-gray-600 dark:text-gray-400 font-mono">{c.mobile}</td>
+                        {campaignContactFields.map(f => (
+                          <td key={f} className="px-4 py-2.5 text-gray-500 max-w-[120px] truncate">{c.extra_data?.[f] || '—'}</td>
+                        ))}
+                        <td className="px-4 py-2.5">
+                          <span className={cn(
+                            'inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-semibold',
+                            c.status === 'pending' ? 'bg-blue-100 text-blue-700' :
+                            c.status === 'called' ? 'bg-green-100 text-green-700' :
+                            c.status === 'callback' ? 'bg-orange-100 text-orange-700' :
+                            c.status === 'dnc' ? 'bg-red-100 text-red-700' :
+                            'bg-gray-100 text-gray-600'
+                          )}>{c.status}</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-400">{c.call_count}</td>
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            onClick={() => dialContact(c)}
+                            disabled={!!activeCall || !!wrapup || dialingContactId === c.id}
+                            className={cn(
+                              'flex items-center gap-1 px-2.5 py-1 rounded-lg text-2xs font-semibold transition-colors ml-auto',
+                              activeCall || wrapup ? 'bg-gray-100 text-gray-400 cursor-not-allowed' :
+                              'bg-purple-600 hover:bg-purple-700 text-white'
+                            )}
+                          >
+                            {dialingContactId === c.id ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <PhoneOutgoing className="w-3 h-3" />
+                            )}
+                            Dial
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {campaignTotal > 30 && (
+                <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100 dark:border-gray-800">
+                  <button
+                    disabled={campaignPage === 1}
+                    onClick={() => setCampaignPage(p => p - 1)}
+                    className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-40"
+                  >← Prev</button>
+                  <span className="text-xs text-gray-400">Page {campaignPage} of {Math.ceil(campaignTotal / 30)}</span>
+                  <button
+                    disabled={campaignPage * 30 >= campaignTotal}
+                    onClick={() => setCampaignPage(p => p + 1)}
+                    className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-40"
+                  >Next →</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
