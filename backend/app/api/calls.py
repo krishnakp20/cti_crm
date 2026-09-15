@@ -19,6 +19,11 @@ class CampaignCreate(BaseModel):
     settings: Optional[dict] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
+    client_id: Optional[int] = None  # admin can specify; non-admin uses their own
+    dial_prefix: Optional[str] = None      # prepended to mobile before dialing e.g. "0"
+    dial_context: Optional[str] = None     # Asterisk dialplan context, default from-internal
+    caller_id_name: Optional[str] = None   # e.g. "Sheesha Green"
+    caller_id_number: Optional[str] = None # e.g. "02212345678"
 
 
 class CallbackCreate(BaseModel):
@@ -42,10 +47,20 @@ class CallLogCreate(BaseModel):
 async def list_campaigns(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = None,
+    client_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Campaign).where(Campaign.client_id == current_user.client_id)
+    from app.models.user import UserRole
+    q = select(Campaign)
+    if current_user.role == UserRole.ADMIN:
+        if client_id:
+            q = q.where(Campaign.client_id == client_id)
+    else:
+        q = q.where(Campaign.client_id == current_user.client_id)
+    if status:
+        q = q.where(Campaign.status == status)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page-1)*limit).limit(limit).order_by(Campaign.created_at.desc()))
     return {"total": total, "items": result.scalars().all()}
@@ -53,11 +68,36 @@ async def list_campaigns(
 
 @router.post("/campaigns")
 async def create_campaign(req: CampaignCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    campaign = Campaign(client_id=current_user.client_id, created_by=current_user.id, **req.model_dump(exclude_none=True))
+    from app.models.user import UserRole
+    # Admin can pass client_id explicitly; regular users always use their own
+    if current_user.role == UserRole.ADMIN and req.client_id:
+        client_id = req.client_id
+    elif current_user.client_id:
+        client_id = current_user.client_id
+    else:
+        raise HTTPException(400, "No client associated with your account. Ask a superadmin to assign you to a client first.")
+    data = req.model_dump(exclude_none=True)
+    data.pop("client_id", None)
+    campaign = Campaign(client_id=client_id, created_by=current_user.id, **data)
     db.add(campaign)
     await db.commit()
     await db.refresh(campaign)
     return campaign
+
+
+class CampaignStatusUpdate(BaseModel):
+    status: str  # draft | active | paused | completed | archived
+
+@router.patch("/campaigns/{campaign_id}/status")
+async def update_campaign_status(
+    campaign_id: int,
+    req: CampaignStatusUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(update(Campaign).where(Campaign.id == campaign_id).values(status=req.status))
+    await db.commit()
+    return {"status": req.status}
 
 
 MOBILE_HINTS = {"mobile", "phone", "number", "contact", "cell", "mob", "phoneno", "phone_no", "mobileno"}
@@ -110,8 +150,14 @@ async def upload_calling_data(
     import io, pandas as pd
     content = await file.read()
 
+    # Resolve client_id from the campaign (works for admin who has no client_id)
+    camp = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
+    if not camp:
+        raise HTTPException(404, "Campaign not found")
+    effective_client_id = camp.client_id or current_user.client_id
+
     batch = UploadBatch(
-        client_id=current_user.client_id,
+        client_id=effective_client_id,
         campaign_id=campaign_id,
         file_name=file.filename,
         file_url="",
@@ -144,7 +190,7 @@ async def upload_calling_data(
             extra = {c: row.get(c, "") for c in extra_cols if row.get(c, "")}
             record = UploadRecord(
                 batch_id=batch.id,
-                client_id=current_user.client_id,
+                client_id=effective_client_id,
                 campaign_id=campaign_id,
                 name=row.get(name_field, "").strip() or mobile,
                 mobile=mobile,
@@ -610,20 +656,33 @@ async def originate_call(
         select(UploadRecord).where(UploadRecord.id == req.contact_id)
     )).scalar_one_or_none()
 
+    # Fetch campaign dial settings
+    camp = (await db.execute(
+        select(Campaign).where(Campaign.id == req.campaign_id)
+    )).scalar_one_or_none()
+    dial_prefix = (camp.dial_prefix or "").strip() if camp else ""
+    dial_context = (camp.dial_context or "from-internal").strip() if camp else "from-internal"
+    cid_name = (camp.caller_id_name or current_user.full_name).strip() if camp else current_user.full_name
+    cid_number = (camp.caller_id_number or "").strip() if camp else ""
+
+    # Apply prefix to destination
+    dial_dest = f"{dial_prefix}{dest}"
+
     # Unique call ID
     import time, uuid
     call_uid = f"ob-{int(time.time())}-{uuid.uuid4().hex[:6]}"
-    caller_id_num = req.caller_id or ext
+    # Priority: request override → campaign caller ID → agent extension
+    caller_id_num = req.caller_id or cid_number or ext
 
     # AMI Originate — send as raw lines so multiple Variable: headers work
     ami_lines = (
         f"Action: Originate\r\n"
         f"Channel: PJSIP/{ext}\r\n"
-        f"Context: from-internal\r\n"
-        f"Exten: {dest}\r\n"
+        f"Context: {dial_context}\r\n"
+        f"Exten: {dial_dest}\r\n"
         f"Priority: 1\r\n"
         f"Timeout: 30000\r\n"
-        f'CallerID: "{current_user.full_name}" <{caller_id_num}>\r\n'
+        f'CallerID: "{cid_name}" <{caller_id_num}>\r\n'
         f"Variable: OUTBOUND_AGENT={ext}\r\n"
         f"Variable: OUTBOUND_CONTACT={req.contact_id}\r\n"
         f"Variable: OUTBOUND_CAMPAIGN={req.campaign_id}\r\n"

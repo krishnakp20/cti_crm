@@ -7,6 +7,8 @@ import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 import { cn } from '../../utils/cn'
 import api from '../../services/api'
+import { useSelector } from 'react-redux'
+import { RootState } from '../../redux/store'
 
 const STATUS_COLORS: any = {
   draft: 'badge bg-gray-100 text-gray-600',
@@ -29,14 +31,22 @@ export default function CampaignsPage() {
   const [previewLoading, setPreviewLoading] = useState(false)
   const qc = useQueryClient()
   const { register, handleSubmit, reset } = useForm()
+  const adminClientId = useSelector((s: RootState) => s.ui.adminClientId)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['campaigns'],
-    queryFn: () => callsApi.listCampaigns().then(r => r.data),
+    queryKey: ['campaigns', adminClientId],
+    queryFn: () => callsApi.listCampaigns(adminClientId ? { client_id: adminClientId } : {}).then(r => r.data),
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      api.patch(`/calls/campaigns/${id}/status`, { status }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['campaigns'] }),
+    onError: (e: any) => toast.error(e?.response?.data?.detail || 'Failed to update status'),
   })
 
   const createMutation = useMutation({
-    mutationFn: (d: any) => callsApi.createCampaign(d),
+    mutationFn: (d: any) => callsApi.createCampaign({ ...d, ...(adminClientId ? { client_id: adminClientId } : {}) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['campaigns'] }); toast.success('Campaign created'); setShowModal(false); reset() },
   })
 
@@ -113,16 +123,51 @@ export default function CampaignsPage() {
                 </div>
                 <span className={STATUS_COLORS[c.status] || 'badge'}>{c.status}</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="badge bg-indigo-100 text-indigo-700 capitalize">{c.campaign_type?.replace('_', ' ')}</span>
+                {c.caller_id_number && (
+                  <span className="badge bg-purple-100 text-purple-700 font-mono">CID: {c.caller_id_number}</span>
+                )}
+                {c.dial_prefix && (
+                  <span className="badge bg-orange-100 text-orange-700 font-mono">prefix: {c.dial_prefix}</span>
+                )}
+                {c.dial_context && c.dial_context !== 'from-internal' && (
+                  <span className="badge bg-gray-100 text-gray-600 font-mono">{c.dial_context}</span>
+                )}
                 <span className="text-2xs text-gray-400">{c.created_at ? format(new Date(c.created_at), 'MMM d') : ''}</span>
               </div>
-              <button
-                className="btn-secondary w-full btn-sm justify-center"
-                onClick={() => setUploadCampaign(c.id)}
-              >
-                <Upload className="w-3.5 h-3.5" /> Upload Data
-              </button>
+              <div className="flex gap-2">
+                <button
+                  className="btn-secondary flex-1 btn-sm justify-center"
+                  onClick={() => setUploadCampaign(c.id)}
+                >
+                  <Upload className="w-3.5 h-3.5" /> Upload
+                </button>
+                {c.status === 'draft' && (
+                  <button
+                    className="btn-sm bg-green-600 hover:bg-green-700 text-white px-3 rounded-lg text-xs font-semibold"
+                    onClick={() => statusMutation.mutate({ id: c.id, status: 'active' })}
+                  >
+                    Activate
+                  </button>
+                )}
+                {c.status === 'active' && (
+                  <button
+                    className="btn-sm bg-yellow-500 hover:bg-yellow-600 text-white px-3 rounded-lg text-xs font-semibold"
+                    onClick={() => statusMutation.mutate({ id: c.id, status: 'paused' })}
+                  >
+                    Pause
+                  </button>
+                )}
+                {c.status === 'paused' && (
+                  <button
+                    className="btn-sm bg-green-600 hover:bg-green-700 text-white px-3 rounded-lg text-xs font-semibold"
+                    onClick={() => statusMutation.mutate({ id: c.id, status: 'active' })}
+                  >
+                    Resume
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -152,6 +197,30 @@ export default function CampaignsPage() {
               <div>
                 <label className="label">Description</label>
                 <textarea {...register('description')} className="input resize-none" rows={2} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Caller ID Name <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input {...register('caller_id_name')} className="input" placeholder="e.g. Sheesha Green" />
+                  <p className="text-2xs text-gray-400 mt-1">Shown to customer on their phone</p>
+                </div>
+                <div>
+                  <label className="label">Caller ID Number <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input {...register('caller_id_number')} className="input" placeholder="e.g. 02212345678" />
+                  <p className="text-2xs text-gray-400 mt-1">Number shown to customer</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Dial Prefix <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input {...register('dial_prefix')} className="input" placeholder="e.g. 0 or 9" />
+                  <p className="text-2xs text-gray-400 mt-1">Prepended to mobile before dialing</p>
+                </div>
+                <div>
+                  <label className="label">Asterisk Context <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input {...register('dial_context')} className="input" placeholder="from-internal" />
+                  <p className="text-2xs text-gray-400 mt-1">Default: from-internal</p>
+                </div>
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="button" className="btn-secondary flex-1" onClick={() => { setShowModal(false); reset() }}>Cancel</button>

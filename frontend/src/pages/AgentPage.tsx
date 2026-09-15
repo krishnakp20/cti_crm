@@ -454,7 +454,7 @@ export default function AgentPage() {
 
   // Load active campaigns for dialer tab
   useEffect(() => {
-    api.get('/calls/campaigns', { params: { status: 'active', limit: 50 } }).then(r => {
+    api.get('/calls/campaigns', { params: { limit: 50 } }).then(r => {
       const items = Array.isArray(r.data) ? r.data : (r.data?.items || [])
       setCampaignList(items)
       if (items.length > 0 && !selectedCampaign) setSelectedCampaign(items[0].id)

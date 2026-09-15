@@ -46,6 +46,10 @@ class Campaign(Base):
     contact_fields: Mapped[Optional[list]] = mapped_column(JSON)  # CSV column names e.g. ["city","product"]
     mobile_field: Mapped[Optional[str]] = mapped_column(String(100))   # which CSV col = mobile
     name_field: Mapped[Optional[str]] = mapped_column(String(100))     # which CSV col = name
+    dial_prefix: Mapped[Optional[str]] = mapped_column(String(20))     # e.g. "0", "9", "00"
+    dial_context: Mapped[Optional[str]] = mapped_column(String(100))   # Asterisk context, default from-internal
+    caller_id_name: Mapped[Optional[str]] = mapped_column(String(100)) # e.g. "Sheesha Green"
+    caller_id_number: Mapped[Optional[str]] = mapped_column(String(30))# e.g. "02212345678"
     start_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
