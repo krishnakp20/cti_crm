@@ -297,11 +297,19 @@ class AMIClient:
             async with await self._db_session() as db:
                 existing = (await db.execute(select(CallRecord).where(CallRecord.asterisk_unique_id == uid))).scalar_one_or_none()
                 if not existing:
-                    # Resolve client_id from any agent who has an extension (pick first active user)
+                    # Resolve client_id from a user who is a member of this queue's extension
                     client_id = None
-                    any_user = (await db.execute(select(User).where(User.extension.isnot(None), User.client_id.isnot(None)).limit(1))).scalar_one_or_none()
-                    if any_user:
-                        client_id = any_user.client_id
+                    queue_name = pkt.get("Queue", "")
+                    from app.models.ivr import IVRRoute
+                    ivr_route = (await db.execute(
+                        select(IVRRoute).where(IVRRoute.queue_name == queue_name).limit(1)
+                    )).scalar_one_or_none()
+                    if ivr_route:
+                        client_id = ivr_route.client_id
+                    else:
+                        any_user = (await db.execute(select(User).where(User.extension.isnot(None), User.client_id.isnot(None)).limit(1))).scalar_one_or_none()
+                        if any_user:
+                            client_id = any_user.client_id
                     ivr = self._ivr_vars.get(uid, {})
                     db.add(CallRecord(
                         asterisk_unique_id=uid,
