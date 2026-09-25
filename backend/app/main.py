@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     # Start AMI connection (non-blocking — fails gracefully if Asterisk unreachable)
     import asyncio
     asyncio.create_task(ami_client.connect())
+    asyncio.create_task(_stale_call_cleanup())
     logger.info("Application ready")
     yield
     logger.info("Shutting down...")
@@ -61,6 +62,28 @@ app.include_router(realtime.router, prefix=API_PREFIX)
 app.include_router(ivr.router, prefix=API_PREFIX)
 app.include_router(voicemail.router, prefix=API_PREFIX)
 app.include_router(ws_router)
+
+
+async def _stale_call_cleanup():
+    """Every 5 minutes, close call records stuck in active/queued for over 2 hours."""
+    import asyncio
+    from datetime import datetime, timedelta
+    from sqlalchemy import update
+    from app.models.cdr import CallRecord
+    while True:
+        await asyncio.sleep(300)
+        try:
+            cutoff = datetime.now() - timedelta(hours=2)
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    update(CallRecord)
+                    .where(CallRecord.call_status.in_(["active", "queued", "answered"]))
+                    .where(CallRecord.queue_start_time < cutoff)
+                    .values(call_status="completed", call_end_time=datetime.now())
+                )
+                await db.commit()
+        except Exception as e:
+            logger.warning("Stale call cleanup error: %s", e)
 
 
 @app.get("/health")
