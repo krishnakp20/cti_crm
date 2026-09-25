@@ -82,6 +82,13 @@ async def _stale_call_cleanup():
                     .values(call_status="completed", call_end_time=datetime.now())
                 )
                 await db.commit()
+            # Also clear stale entries from in-memory active_calls dict
+            stale_uids = [
+                uid for uid, v in list(ami_client._active_calls.items())
+                if v.get("start_time") and (datetime.now() - v["start_time"]).total_seconds() > 7200
+            ]
+            for uid in stale_uids:
+                ami_client._active_calls.pop(uid, None)
         except Exception as e:
             logger.warning("Stale call cleanup error: %s", e)
 
