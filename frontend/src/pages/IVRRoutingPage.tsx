@@ -176,11 +176,6 @@ export default function IVRRoutingPage() {
     return <div className="p-8 text-center text-gray-500">Access restricted to Admin and Client roles.</div>
   }
 
-  // Get client name for selected config
-  const activeClientName = activeConfig
-    ? clients.find((c: any) => c.id === activeConfig.client_id)?.company_name ?? `Client #${activeConfig.client_id}`
-    : null
-
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -219,28 +214,29 @@ export default function IVRRoutingPage() {
             <option value="">All clients</option>
             {clients.map((c: any) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
           </select>
-          {activeClientName && (
-            <span className="text-xs text-gray-400">Showing: <span className="font-medium text-gray-600 dark:text-gray-300">{activeClientName}</span></span>
-          )}
         </div>
       )}
 
       {/* Config tabs */}
       {configs.length > 1 && (
         <div className="flex gap-2 flex-wrap">
-          {configs.map((c: any) => (
-            <button
-              key={c.id}
-              onClick={() => setSelectedConfig(c.id)}
-              className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
-                activeConfigId === c.id
-                  ? 'bg-primary-600 text-white border-primary-600'
-                  : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-primary-400'
-              )}
-            >
-              {c.name}
-            </button>
-          ))}
+          {configs.map((c: any) => {
+            const clientName = clients.find((cl: any) => cl.id === c.client_id)?.company_name
+            const label = !filterClientId && clientName ? `${clientName} › ${c.name}` : c.name
+            return (
+              <button
+                key={c.id}
+                onClick={() => setSelectedConfig(c.id)}
+                className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                  activeConfigId === c.id
+                    ? 'bg-primary-600 text-white border-primary-600'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-primary-400'
+                )}
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
       )}
 
