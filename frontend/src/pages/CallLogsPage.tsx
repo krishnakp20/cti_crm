@@ -4,7 +4,7 @@ import { useSelector } from 'react-redux'
 import { RootState } from '../redux/store'
 import { cdrApi } from '../services/api'
 import { useAdminClient } from '../hooks/useAdminClient'
-import { Phone, PhoneCall, PhoneOff, Clock, Play, Square, ChevronDown, ChevronUp, Loader2, Search, Download } from 'lucide-react'
+import { Phone, PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneOff, Clock, Play, ChevronDown, ChevronUp, Loader2, Search, Download } from 'lucide-react'
 import { cn } from '../utils/cn'
 
 function useAuthDownload() {
@@ -76,6 +76,7 @@ export default function CallLogsPage() {
   const [search, setSearch] = useState('')
   const [department, setDepartment] = useState('')
   const [callStatus, setCallStatus] = useState('')
+  const [direction, setDirection] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -88,6 +89,7 @@ export default function CallLogsPage() {
     ...(search && { search }),
     ...(department && { department }),
     ...(callStatus && { call_status: callStatus }),
+    ...(direction && { direction }),
     ...(dateFrom && { date_from: dateFrom }),
     ...(dateTo && { date_to: dateTo }),
     ...clientFilter,
@@ -167,6 +169,11 @@ export default function CallLogsPage() {
           <option value="abandoned">Abandoned</option>
           <option value="no_answer">No Answer</option>
         </select>
+        <select className="input text-sm w-auto" value={direction} onChange={e => { setDirection(e.target.value); setPage(1) }}>
+          <option value="">All Calls</option>
+          <option value="inbound">Inbound</option>
+          <option value="outbound">Outbound</option>
+        </select>
         <input type="date" className="input text-sm w-auto" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1) }} />
         <span className="text-xs text-gray-400">to</span>
         <input type="date" className="input text-sm w-auto" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1) }} />
@@ -175,7 +182,8 @@ export default function CallLogsPage() {
       {/* Table */}
       <div className="card overflow-hidden">
         {/* Table header */}
-        <div className="grid grid-cols-[1fr_1.2fr_1fr_1fr_0.7fr_0.7fr_0.8fr_auto] gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-800/50 text-2xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 dark:border-gray-800">
+        <div className="grid grid-cols-[auto_1fr_1.2fr_1fr_1fr_0.7fr_0.7fr_0.8fr_auto] gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-800/50 text-2xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 dark:border-gray-800">
+          <span>Dir</span>
           <span>Caller</span>
           <span>Department</span>
           <span>Agent</span>
@@ -199,9 +207,14 @@ export default function CallLogsPage() {
               <div key={r.id}>
                 {/* Row */}
                 <div
-                  className="grid grid-cols-[1fr_1.2fr_1fr_1fr_0.7fr_0.7fr_0.8fr_auto] gap-2 px-4 py-2.5 items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
+                  className="grid grid-cols-[auto_1fr_1.2fr_1fr_1fr_0.7fr_0.7fr_0.8fr_auto] gap-2 px-4 py-2.5 items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
                   onClick={() => setExpanded(expanded === r.id ? null : r.id)}
                 >
+                  <span title={r.direction === 'outbound' ? 'Outbound' : 'Inbound'}>
+                    {r.direction === 'outbound'
+                      ? <PhoneOutgoing className="w-3.5 h-3.5 text-blue-500" />
+                      : <PhoneIncoming className="w-3.5 h-3.5 text-green-500" />}
+                  </span>
                   <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{r.caller_number}</span>
                   <span>
                     {r.department ? (
@@ -251,6 +264,7 @@ export default function CallLogsPage() {
                 {/* Expanded detail */}
                 {expanded === r.id && (
                   <div className="px-4 py-4 bg-gray-50 dark:bg-gray-800/30 border-t border-gray-100 dark:border-gray-800 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                    <DetailItem label="Direction" value={r.direction === 'outbound' ? '↑ Outbound' : '↓ Inbound'} />
                     <DetailItem label="Asterisk ID" value={r.asterisk_unique_id} />
                     <DetailItem label="Queue" value={r.queue_name} />
                     <DetailItem label="IVR Key Pressed" value={r.ivr_selection} />

@@ -33,9 +33,12 @@ def _has_recording(r: CallRecord) -> bool:
 
 
 def _record_dict(r: CallRecord) -> dict:
+    uid = r.asterisk_unique_id or ""
+    direction = "outbound" if uid.startswith("ob-") else "inbound"
     return {
         "id": r.id,
-        "asterisk_unique_id": r.asterisk_unique_id,
+        "asterisk_unique_id": uid,
+        "direction": direction,
         "caller_number": r.caller_number,
         "department": r.department,
         "queue_name": r.queue_name,
@@ -54,7 +57,7 @@ def _record_dict(r: CallRecord) -> dict:
         "call_summary": r.call_summary,
         "tags": r.tags or [],
         "ticket_id": r.ticket_id,
-        "recording_filename": r.recording_filename or (f"{r.asterisk_unique_id}.wav" if r.asterisk_unique_id else None),
+        "recording_filename": r.recording_filename or (f"{uid}.wav" if uid else None),
         "has_recording": _has_recording(r),
         "created_at": r.created_at,
     }
@@ -67,6 +70,7 @@ async def list_cdr(
     department: Optional[str] = None,
     agent_id: Optional[int] = None,
     call_status: Optional[str] = None,
+    direction: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     search: Optional[str] = None,
@@ -110,6 +114,10 @@ async def list_cdr(
         q = q.where(CallRecord.created_at >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
         q = q.where(CallRecord.created_at <= datetime.combine(date_to, datetime.max.time()))
+    if direction == "outbound":
+        q = q.where(CallRecord.asterisk_unique_id.like("ob-%"))
+    elif direction == "inbound":
+        q = q.where(~CallRecord.asterisk_unique_id.like("ob-%"))
     if search:
         q = q.where(or_(
             CallRecord.caller_number.ilike(f"%{search}%"),
