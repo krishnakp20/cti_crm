@@ -38,6 +38,7 @@ export default function IVRRoutingPage() {
   const qc = useQueryClient()
 
   const [selectedConfig, setSelectedConfig] = useState<number | null>(null)
+  const [filterClientId, setFilterClientId] = useState<number | ''>('')
   const [editRoute, setEditRoute] = useState<any | null>(null)
   const [showRouteModal, setShowRouteModal] = useState(false)
   const [overrideRoute, setOverrideRoute] = useState<any | null>(null)
@@ -47,14 +48,15 @@ export default function IVRRoutingPage() {
   const [newConfigClientId, setNewConfigClientId] = useState<number | ''>('')
   const [newConfigName, setNewConfigName] = useState('Main IVR')
 
-  // Fetch configs
+  // Fetch configs — admin can filter by client
   const { data: configs = [], isLoading: loadingConfigs } = useQuery({
-    queryKey: ['ivr-configs'],
-    queryFn: () => ivrApi.listConfigs().then(r => Array.isArray(r.data) ? r.data : []),
+    queryKey: ['ivr-configs', filterClientId],
+    queryFn: () => ivrApi.listConfigs(filterClientId ? { client_id: filterClientId } : undefined).then(r => Array.isArray(r.data) ? r.data : []),
   })
 
   // Auto-select first config once loaded
   const activeConfigId: number | null = selectedConfig ?? (configs.length > 0 ? configs[0].id : null)
+  const activeConfig: any = configs.find((c: any) => c.id === activeConfigId) ?? null
 
   // Fetch routes for selected config
   const { data: routes = [], isLoading: loadingRoutes } = useQuery({
@@ -63,10 +65,12 @@ export default function IVRRoutingPage() {
     enabled: !!activeConfigId,
   })
 
-  // Fetch agents for dropdowns
+  // Fetch agents filtered to the selected config's client
+  const agentClientId: number | null = activeConfig?.client_id ?? null
   const { data: agentsData } = useQuery({
-    queryKey: ['users-agents'],
-    queryFn: () => usersApi.list({ role: 'agent', limit: 100 }).then(r => r.data),
+    queryKey: ['users-agents', agentClientId],
+    queryFn: () => usersApi.list({ role: 'agent', limit: 100, ...(agentClientId ? { client_id: agentClientId } : {}) }).then(r => r.data),
+    enabled: isClient || agentClientId !== null,
   })
   const agents: any[] = agentsData?.items ?? agentsData ?? []
 
@@ -163,9 +167,19 @@ export default function IVRRoutingPage() {
     })
   }
 
+  const handleClientFilterChange = (clientId: number | '') => {
+    setFilterClientId(clientId)
+    setSelectedConfig(null)
+  }
+
   if (!isAdmin && !isClient) {
     return <div className="p-8 text-center text-gray-500">Access restricted to Admin and Client roles.</div>
   }
+
+  // Get client name for selected config
+  const activeClientName = activeConfig
+    ? clients.find((c: any) => c.id === activeConfig.client_id)?.company_name ?? `Client #${activeConfig.client_id}`
+    : null
 
   return (
     <div className="space-y-4">
@@ -192,6 +206,24 @@ export default function IVRRoutingPage() {
           </button>
         </div>
       </div>
+
+      {/* Admin: client filter */}
+      {isAdmin && (
+        <div className="flex items-center gap-3">
+          <label className="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">Filter by client:</label>
+          <select
+            className="input text-sm max-w-xs"
+            value={filterClientId}
+            onChange={e => handleClientFilterChange(e.target.value ? Number(e.target.value) : '')}
+          >
+            <option value="">All clients</option>
+            {clients.map((c: any) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+          </select>
+          {activeClientName && (
+            <span className="text-xs text-gray-400">Showing: <span className="font-medium text-gray-600 dark:text-gray-300">{activeClientName}</span></span>
+          )}
+        </div>
+      )}
 
       {/* Config tabs */}
       {configs.length > 1 && (
@@ -338,7 +370,7 @@ export default function IVRRoutingPage() {
         </div>
       )}
 
-      {/* ── Add/Edit Route Modal ── */}
+      {/* Add/Edit Route Modal */}
       {showRouteModal && editRoute && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-lg">
@@ -432,7 +464,7 @@ export default function IVRRoutingPage() {
         </div>
       )}
 
-      {/* ── Override Modal ── */}
+      {/* Override Modal */}
       {overrideRoute && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-sm">
@@ -476,7 +508,7 @@ export default function IVRRoutingPage() {
         </div>
       )}
 
-      {/* ── New Config Modal (admin only) ── */}
+      {/* New Config Modal (admin only) */}
       {showNewConfig && isAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-sm">
