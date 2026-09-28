@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, not_
+from sqlalchemy import cast, String
 from typing import Optional
 from datetime import datetime, date
 import os
@@ -74,6 +75,17 @@ async def list_cdr(
     current_user: User = Depends(get_current_user),
 ):
     q = select(CallRecord).order_by(CallRecord.created_at.desc())
+
+    # Exclude agent-leg CDRs from outbound originate: caller_number is a short
+    # extension (3-5 digits) and the record has no queue and no call duration.
+    from sqlalchemy import func as sqlfunc
+    q = q.where(
+        ~(
+            (sqlfunc.length(CallRecord.caller_number) <= 5) &
+            (CallRecord.queue_name == None) &
+            (CallRecord.call_duration == None)
+        )
+    )
 
     # Scope by role
     if current_user.role == UserRole.ADMIN:

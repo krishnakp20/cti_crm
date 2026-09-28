@@ -62,7 +62,10 @@ function fmt(s: number | null) {
 
 function fmtTime(d: string | null) {
   if (!d) return '—'
-  return new Date(d).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
+  return new Date(d).toLocaleString('en-IN', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  })
 }
 
 export default function CallLogsPage() {
