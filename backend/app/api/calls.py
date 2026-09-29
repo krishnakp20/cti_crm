@@ -362,6 +362,7 @@ async def call_arrived(payload: dict, db: AsyncSession = Depends(get_db)):
                         "field_type": f.field_type.value if hasattr(f.field_type, 'value') else str(f.field_type),
                         "placeholder": f.placeholder,
                         "options": f.options,
+                        "validations": f.validations,
                         "is_required": f.is_required,
                         "order": f.order,
                     }
@@ -463,6 +464,7 @@ async def vicidial_start_call_hook(
                         "id": f.id, "label": f.label, "field_name": f.field_name,
                         "field_type": f.field_type.value if hasattr(f.field_type, "value") else str(f.field_type),
                         "placeholder": f.placeholder, "options": f.options,
+                        "validations": f.validations,
                         "is_required": f.is_required, "order": f.order,
                     }
                     for f in fields
@@ -746,6 +748,7 @@ async def originate_call(
                     {"id": f.id, "label": f.label, "field_name": f.field_name,
                      "field_type": f.field_type.value if hasattr(f.field_type, "value") else str(f.field_type),
                      "placeholder": f.placeholder, "options": f.options,
+                     "validations": f.validations,
                      "is_required": f.is_required, "order": f.order}
                     for f in fields
                 ],
