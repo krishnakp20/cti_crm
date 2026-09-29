@@ -67,6 +67,25 @@ export default function TicketNewPage() {
 
   const renderField = (field: any) => {
     const val = formData[field.field_name] || ''
+    const dependsOn: string | undefined = field.validations?.depends_on
+    const parentVal: string = dependsOn ? (formData[dependsOn] || '') : ''
+
+    // Filter options for dependent dropdowns
+    const allOptions: any[] = field.options || []
+    const options = dependsOn
+      ? allOptions.filter((o: any) => !o.show_when || o.show_when === parentVal)
+      : allOptions
+
+    // If dependent and no parent selected yet, show disabled placeholder
+    if (dependsOn && !parentVal) {
+      return <select className={inputCls + ' opacity-50'} disabled><option>— select parent field first —</option></select>
+    }
+
+    // Clear this field's value if parent changed and current value is no longer valid
+    if (dependsOn && val && !options.find((o: any) => o.value === val)) {
+      update(field.field_name, '')
+    }
+
     switch (field.field_type) {
       case 'textarea':
         return <textarea className={inputCls + ' resize-none'} rows={2} value={val} onChange={e => update(field.field_name, e.target.value)} placeholder={field.placeholder || field.label} />
@@ -75,7 +94,7 @@ export default function TicketNewPage() {
           <div className="relative">
             <select className={inputCls + ' appearance-none pr-7'} value={val} onChange={e => update(field.field_name, e.target.value)}>
               <option value="">Select...</option>
-              {(field.options || []).map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {options.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             <ChevronDown className="absolute right-2 top-2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
           </div>
@@ -83,7 +102,7 @@ export default function TicketNewPage() {
       case 'radio':
         return (
           <div className="flex flex-wrap gap-1.5">
-            {(field.options || []).map((o: any) => (
+            {options.map((o: any) => (
               <button type="button" key={o.value} onClick={() => update(field.field_name, o.value)}
                 className={cn('px-2.5 py-1 text-xs rounded-full border font-medium transition-all',
                   val === o.value ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-200 hover:border-primary-300')}>
@@ -95,7 +114,7 @@ export default function TicketNewPage() {
       case 'checkbox':
         return (
           <div className="flex flex-wrap gap-3">
-            {(field.options || []).map((o: any) => (
+            {options.map((o: any) => (
               <label key={o.value} className="flex items-center gap-1.5 text-xs cursor-pointer">
                 <input type="checkbox" checked={(val || []).includes(o.value)}
                   onChange={e => { const a = val||[]; update(field.field_name, e.target.checked ? [...a, o.value] : a.filter((v: string) => v !== o.value)) }}

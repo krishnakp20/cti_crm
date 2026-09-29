@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form'
 import { useSelector } from 'react-redux'
 import { RootState } from '../../redux/store'
 import toast from 'react-hot-toast'
-import { ArrowLeft, Plus, Trash2, GripVertical, Loader2 } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, GripVertical, Loader2, Link2 } from 'lucide-react'
 import { cn } from '../../utils/cn'
 
 const FIELD_TYPES = [
@@ -30,12 +30,24 @@ interface FieldDef {
   field_type: string
   placeholder?: string
   is_required: boolean
-  options?: string
+  options?: string      // plain "one per line" OR "ParentVal | Option" for dependent
+  depends_on?: string   // field_name of the parent field
   order: number
   width: string
 }
 
 function makeId() { return Math.random().toString(36).slice(2) }
+
+/** Parse options textarea → [{label, value, show_when?}] */
+function parseOptions(raw: string, hasDependsOn: boolean) {
+  return raw.split('\n').filter(Boolean).map(line => {
+    if (hasDependsOn && line.includes('|')) {
+      const [parent, rest] = line.split('|').map(s => s.trim())
+      return { label: rest, value: rest.toLowerCase().replace(/\s+/g, '_'), show_when: parent.toLowerCase().replace(/\s+/g, '_') }
+    }
+    return { label: line.trim(), value: line.trim().toLowerCase().replace(/\s+/g, '_') }
+  })
+}
 
 export default function FormBuilderPage() {
   const { id } = useParams()
@@ -43,7 +55,7 @@ export default function FormBuilderPage() {
   const user = useSelector((s: RootState) => s.auth.user)
   const isAdmin = user?.role === 'admin'
 
-  const { register, handleSubmit, setValue, watch } = useForm({
+  const { register, handleSubmit, setValue } = useForm({
     defaultValues: { name: '', slug: '', description: '', category: 'ticket', is_public: false, assign_to_client_id: '' },
   })
 
@@ -79,17 +91,32 @@ export default function FormBuilderPage() {
 
   useEffect(() => {
     if (existingFields) {
-      setFields(existingFields.map((f: any) => ({
-        id: makeId(),
-        label: f.label,
-        field_name: f.field_name,
-        field_type: f.field_type,
-        placeholder: f.placeholder || '',
-        is_required: f.is_required,
-        options: f.options ? f.options.map((o: any) => o.label || o).join('\n') : '',
-        order: f.order,
-        width: f.width || 'full',
-      })))
+      setFields(existingFields.map((f: any) => {
+        const dependsOn = f.validations?.depends_on || ''
+        // Rebuild textarea: if options have show_when, prefix with parent
+        const optText = f.options
+          ? f.options.map((o: any) => {
+              if (o.show_when) {
+                // find the parent label from its original value
+                const parentLabel = o.show_when
+                return `${parentLabel} | ${o.label}`
+              }
+              return o.label || o
+            }).join('\n')
+          : ''
+        return {
+          id: makeId(),
+          label: f.label,
+          field_name: f.field_name,
+          field_type: f.field_type,
+          placeholder: f.placeholder || '',
+          is_required: f.is_required,
+          options: optText,
+          depends_on: dependsOn,
+          order: f.order,
+          width: f.width || 'full',
+        }
+      }))
     }
   }, [existingFields])
 
@@ -106,7 +133,8 @@ export default function FormBuilderPage() {
           is_required: f.is_required,
           order: i,
           width: f.width,
-          options: f.options ? f.options.split('\n').filter(Boolean).map((o: string) => ({ label: o, value: o.toLowerCase().replace(/\s+/g, '_') })) : undefined,
+          options: f.options ? parseOptions(f.options, !!f.depends_on) : undefined,
+          validations: f.depends_on ? { depends_on: f.depends_on } : undefined,
         })),
       }
       if (id) return formsApi.update(Number(id), payload)
@@ -130,6 +158,9 @@ export default function FormBuilderPage() {
 
   const sel = fields.find(f => f.id === selected)
 
+  // Fields that can act as parent (dropdown/radio only)
+  const parentCandidates = fields.filter(f => f.id !== selected && ['dropdown', 'radio'].includes(f.field_type))
+
   return (
     <div className="flex flex-col h-full max-h-screen -m-6">
       <div className="flex items-center gap-3 px-6 py-3 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
@@ -141,6 +172,7 @@ export default function FormBuilderPage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Left: form settings + field list */}
         <div className="w-64 bg-white dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800 flex flex-col overflow-hidden flex-shrink-0">
           <div className="p-3 space-y-2 border-b border-gray-100 dark:border-gray-800">
             <p className="text-2xs font-semibold text-gray-400 uppercase tracking-wider">Form Settings</p>
@@ -172,7 +204,7 @@ export default function FormBuilderPage() {
               <button className="btn-icon" onClick={addField} title="Add field"><Plus className="w-3.5 h-3.5" /></button>
             </div>
             <div className="space-y-1">
-              {fields.map((f, i) => (
+              {fields.map((f) => (
                 <div
                   key={f.id}
                   className={cn('flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-xs group transition-colors',
@@ -182,6 +214,7 @@ export default function FormBuilderPage() {
                 >
                   <GripVertical className="w-3 h-3 text-gray-300 flex-shrink-0" />
                   <span className="flex-1 truncate">{f.label}</span>
+                  {f.depends_on && <Link2 className="w-3 h-3 text-blue-400 flex-shrink-0" title="Dependent field" />}
                   <span className="text-2xs text-gray-400">{f.field_type}</span>
                   <button className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600" onClick={e => { e.stopPropagation(); removeField(f.id) }}>
                     <Trash2 className="w-3 h-3" />
@@ -197,6 +230,7 @@ export default function FormBuilderPage() {
           </div>
         </div>
 
+        {/* Center: field properties */}
         <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-6">
           {sel ? (
             <div className="max-w-md space-y-3">
@@ -219,12 +253,58 @@ export default function FormBuilderPage() {
                 <label className="label">Placeholder</label>
                 <input className="input text-xs" value={sel.placeholder || ''} onChange={e => updateField(sel.id, 'placeholder', e.target.value)} />
               </div>
+
+              {/* Dependent dropdown config */}
               {['dropdown', 'multi_select', 'radio', 'checkbox'].includes(sel.field_type) && (
-                <div>
-                  <label className="label">Options (one per line)</label>
-                  <textarea className="input text-xs resize-none" rows={4} value={sel.options || ''} onChange={e => updateField(sel.id, 'options', e.target.value)} placeholder="Option 1&#10;Option 2&#10;Option 3" />
-                </div>
+                <>
+                  {parentCandidates.length > 0 && (
+                    <div>
+                      <label className="label flex items-center gap-1">
+                        <Link2 className="w-3 h-3 text-blue-500" /> Depends on Field
+                        <span className="text-2xs text-gray-400 font-normal ml-1">(optional)</span>
+                      </label>
+                      <select
+                        className="input text-xs"
+                        value={sel.depends_on || ''}
+                        onChange={e => updateField(sel.id, 'depends_on', e.target.value)}
+                      >
+                        <option value="">— None (show always) —</option>
+                        {parentCandidates.map(p => (
+                          <option key={p.id} value={p.field_name}>{p.label} ({p.field_name})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="label">Options</label>
+                    {sel.depends_on ? (
+                      <>
+                        <p className="text-2xs text-blue-600 dark:text-blue-400 mb-1 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                          Format: <code className="font-mono">ParentValue | Option Label</code> — one per line
+                        </p>
+                        <textarea
+                          className="input text-xs resize-none font-mono"
+                          rows={8}
+                          value={sel.options || ''}
+                          onChange={e => updateField(sel.id, 'options', e.target.value)}
+                          placeholder={`Enquiry | Product related query\nEnquiry | Price Related\nEnquiry | Other\nRequest | Order Related\nRequest | Customization\nComplaint | Defective Product\nComplaint | Wrong product delivered`}
+                        />
+                        <p className="text-2xs text-gray-400 mt-1">The part before <code>|</code> must match a value in the "{fields.find(f => f.field_name === sel.depends_on)?.label || sel.depends_on}" field exactly (case-insensitive).</p>
+                      </>
+                    ) : (
+                      <textarea
+                        className="input text-xs resize-none"
+                        rows={5}
+                        value={sel.options || ''}
+                        onChange={e => updateField(sel.id, 'options', e.target.value)}
+                        placeholder="Option 1&#10;Option 2&#10;Option 3"
+                      />
+                    )}
+                  </div>
+                </>
               )}
+
               <div>
                 <label className="label">Width</label>
                 <select className="input text-xs" value={sel.width} onChange={e => updateField(sel.id, 'width', e.target.value)}>
@@ -246,39 +326,96 @@ export default function FormBuilderPage() {
           )}
         </div>
 
+        {/* Right: preview */}
         <div className="w-72 bg-white dark:bg-gray-900 border-l border-gray-100 dark:border-gray-800 p-4 overflow-y-auto flex-shrink-0">
           <p className="text-2xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Preview</p>
-          <div className="space-y-3">
-            {fields.map(f => (
-              <div key={f.id} className={cn('', f.width === 'half' && 'w-1/2')}>
-                <label className="label">{f.label}{f.is_required && <span className="text-red-500 ml-0.5">*</span>}</label>
-                {f.field_type === 'textarea' ? (
-                  <textarea className="input text-xs resize-none" placeholder={f.placeholder} rows={2} disabled />
-                ) : f.field_type === 'dropdown' ? (
-                  <select className="input text-xs" disabled>
-                    <option>{f.placeholder || 'Select...'}</option>
-                  </select>
-                ) : f.field_type === 'checkbox' ? (
-                  <div className="space-y-1">
-                    {(f.options || '').split('\n').filter(Boolean).map((o, i) => (
-                      <label key={i} className="flex items-center gap-2 text-xs"><input type="checkbox" className="rounded" disabled />{o}</label>
-                    ))}
-                  </div>
-                ) : f.field_type === 'radio' ? (
-                  <div className="space-y-1">
-                    {(f.options || '').split('\n').filter(Boolean).map((o, i) => (
-                      <label key={i} className="flex items-center gap-2 text-xs"><input type="radio" disabled />{o}</label>
-                    ))}
-                  </div>
-                ) : (
-                  <input type={f.field_type === 'date' ? 'date' : 'text'} className="input text-xs" placeholder={f.placeholder} disabled />
-                )}
-              </div>
-            ))}
-            {fields.length === 0 && <p className="text-xs text-gray-400">Add fields to preview form</p>}
-          </div>
+          <FormPreview fields={fields} />
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Live preview with dependent dropdown support */
+function FormPreview({ fields }: { fields: FieldDef[] }) {
+  const [values, setValues] = useState<Record<string, string>>({})
+
+  if (fields.length === 0) return <p className="text-xs text-gray-400">Add fields to preview form</p>
+
+  return (
+    <div className="space-y-3">
+      {fields.map(f => {
+        // If this field depends on another, filter its options
+        let visible = true
+        let filteredOptions: string[] = []
+
+        if (['dropdown', 'multi_select', 'radio', 'checkbox'].includes(f.field_type)) {
+          const rawLines = (f.options || '').split('\n').filter(Boolean)
+          if (f.depends_on) {
+            const parentVal = (values[f.depends_on] || '').toLowerCase().replace(/\s+/g, '_')
+            visible = !!parentVal
+            filteredOptions = rawLines
+              .filter(line => line.includes('|'))
+              .filter(line => {
+                const parent = line.split('|')[0].trim().toLowerCase().replace(/\s+/g, '_')
+                return parent === parentVal
+              })
+              .map(line => line.split('|').slice(1).join('|').trim())
+          } else {
+            filteredOptions = rawLines
+          }
+        }
+
+        if (!visible && f.depends_on) {
+          return (
+            <div key={f.id} className={cn('opacity-40', f.width === 'half' && 'w-1/2')}>
+              <label className="label text-gray-400">{f.label}{f.is_required && <span className="text-red-400 ml-0.5">*</span>}</label>
+              <select className="input text-xs" disabled><option>— select {fields.find(p => p.field_name === f.depends_on)?.label} first —</option></select>
+            </div>
+          )
+        }
+
+        return (
+          <div key={f.id} className={cn('', f.width === 'half' && 'w-1/2')}>
+            <label className="label">{f.label}{f.is_required && <span className="text-red-500 ml-0.5">*</span>}</label>
+            {f.field_type === 'textarea' ? (
+              <textarea className="input text-xs resize-none" placeholder={f.placeholder} rows={2} disabled />
+            ) : f.field_type === 'dropdown' ? (
+              <select
+                className="input text-xs"
+                value={values[f.field_name] || ''}
+                onChange={e => setValues(v => ({ ...v, [f.field_name]: e.target.value }))}
+              >
+                <option value="">{f.placeholder || 'Select...'}</option>
+                {filteredOptions.map((o, i) => <option key={i} value={o.toLowerCase().replace(/\s+/g, '_')}>{o}</option>)}
+              </select>
+            ) : f.field_type === 'checkbox' ? (
+              <div className="space-y-1">
+                {filteredOptions.map((o, i) => (
+                  <label key={i} className="flex items-center gap-2 text-xs"><input type="checkbox" className="rounded" />{o}</label>
+                ))}
+              </div>
+            ) : f.field_type === 'radio' ? (
+              <div className="space-y-1">
+                {filteredOptions.map((o, i) => (
+                  <label key={i} className="flex items-center gap-2 text-xs">
+                    <input type="radio" name={`preview_${f.field_name}`} value={o.toLowerCase().replace(/\s+/g, '_')}
+                      onChange={e => setValues(v => ({ ...v, [f.field_name]: e.target.value }))} />{o}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <input
+                type={f.field_type === 'date' ? 'date' : 'text'}
+                className="input text-xs"
+                placeholder={f.placeholder}
+                value={values[f.field_name] || ''}
+                onChange={e => setValues(v => ({ ...v, [f.field_name]: e.target.value }))}
+              />
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
