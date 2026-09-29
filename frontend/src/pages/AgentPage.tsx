@@ -299,8 +299,21 @@ function SoftphoneBadge({ status, onHangup }: { status: SipStatus; onHangup: () 
 
 // ── Dynamic form field renderer ───────────────────────────────────────────────
 type FormFieldDef = NonNullable<IncomingCall['form']>['fields'][0]
-function DynField({ field, value, onChange }: { field: FormFieldDef; value: any; onChange: (v: any) => void }) {
+function DynField({ field, value, onChange, allValues = {} }: { field: FormFieldDef; value: any; onChange: (v: any) => void; allValues?: Record<string, any> }) {
   const base = 'input w-full text-sm'
+  const dependsOn: string | undefined = (field as any).validations?.depends_on
+  const parentVal: string = dependsOn ? (allValues[dependsOn] || '') : ''
+
+  // Filter options for dependent fields
+  const allOptions: any[] = (field.options || []) as any[]
+  const options = dependsOn
+    ? allOptions.filter((o: any) => !o.show_when || o.show_when === parentVal)
+    : allOptions
+
+  if (dependsOn && !parentVal) {
+    return <select className={base + ' opacity-50'} disabled><option>— select parent field first —</option></select>
+  }
+
   switch (field.field_type) {
     case 'textarea':
       return <textarea className="input w-full text-sm min-h-[56px]" placeholder={field.placeholder} value={value || ''} onChange={e => onChange(e.target.value)} />
@@ -308,13 +321,13 @@ function DynField({ field, value, onChange }: { field: FormFieldDef; value: any;
       return (
         <select className={base} value={value || ''} onChange={e => onChange(e.target.value)}>
           <option value="">— Select —</option>
-          {(field.options || []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {options.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       )
     case 'checkbox':
       return (
         <div className="flex flex-wrap gap-2">
-          {(field.options || []).map(o => (
+          {options.map((o: any) => (
             <label key={o.value} className="flex items-center gap-1 text-sm cursor-pointer">
               <input type="checkbox" checked={(value || []).includes(o.value)} onChange={e => {
                 const arr: string[] = value || []
@@ -328,7 +341,7 @@ function DynField({ field, value, onChange }: { field: FormFieldDef; value: any;
     case 'radio':
       return (
         <div className="flex flex-wrap gap-3">
-          {(field.options || []).map(o => (
+          {options.map((o: any) => (
             <label key={o.value} className="flex items-center gap-1 text-sm cursor-pointer">
               <input type="radio" name={field.field_name} value={o.value} checked={value === o.value} onChange={() => onChange(o.value)} />
               {o.label}
@@ -1137,7 +1150,7 @@ export default function AgentPage() {
                     .map(f => (
                       <div key={f.id} className={f.field_type === 'textarea' ? 'col-span-2' : ''}>
                         <label className="label">{f.label}{f.is_required && <span className="text-red-500 ml-1">*</span>}</label>
-                        <DynField field={f} value={formValues[f.field_name]} onChange={v => setFormValues(p => ({ ...p, [f.field_name]: v }))} />
+                        <DynField field={f} value={formValues[f.field_name]} onChange={v => setFormValues(p => ({ ...p, [f.field_name]: v }))} allValues={formValues} />
                       </div>
                     ))}
                 </div>

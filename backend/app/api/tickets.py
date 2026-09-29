@@ -80,7 +80,18 @@ async def export_tickets(
     result = await db.execute(q)
     tickets = result.scalars().all()
 
-    # Collect all unique form_data keys across all tickets
+    # Build a field_name → label map from all form fields used in these tickets
+    from app.models.form import FormField as FormFieldModel
+    form_ids = list({t.form_id for t in tickets if t.form_id})
+    field_label_map: dict = {}  # field_name → label
+    if form_ids:
+        ff_rows = (await db.execute(
+            select(FormFieldModel).where(FormFieldModel.form_id.in_(form_ids))
+        )).scalars().all()
+        for ff in ff_rows:
+            field_label_map[ff.field_name] = ff.label
+
+    # Collect all unique form_data keys across all tickets (preserve insertion order)
     form_keys: list = []
     seen: set = set()
     for t in tickets:
@@ -90,36 +101,39 @@ async def export_tickets(
                     seen.add(k)
                     form_keys.append(k)
 
-    base_cols = [
-        'ticket_number', 'subject', 'status', 'priority',
-        'customer_name', 'customer_email', 'customer_mobile',
-        'description', 'created_at', 'updated_at',
-    ]
-    headers = base_cols + form_keys
+    # Use label as column header, fall back to field_name if no label found
+    form_headers = [field_label_map.get(k, k) for k in form_keys]
+
+    base_cols = ['Ticket No', 'Subject', 'Status', 'Priority',
+                 'Customer Name', 'Customer Email', 'Customer Mobile',
+                 'Description', 'Created At', 'Updated At']
+    headers = base_cols + form_headers
 
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=headers, extrasaction='ignore')
-    writer.writeheader()
+    writer = csv.writer(output)
+    writer.writerow(headers)
 
     for t in tickets:
-        row = {
-            'ticket_number': t.ticket_number or '',
-            'subject': t.subject or '',
-            'status': t.status.value if hasattr(t.status, 'value') else str(t.status),
-            'priority': t.priority.value if hasattr(t.priority, 'value') else str(t.priority),
-            'customer_name': t.customer_name or '',
-            'customer_email': t.customer_email or '',
-            'customer_mobile': t.customer_mobile or '',
-            'description': (t.description or '').replace('\n', ' '),
-            'created_at': t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '',
-            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M') if t.updated_at else '',
-        }
+        row = [
+            t.ticket_number or '',
+            t.subject or '',
+            t.status.value if hasattr(t.status, 'value') else str(t.status),
+            t.priority.value if hasattr(t.priority, 'value') else str(t.priority),
+            t.customer_name or '',
+            t.customer_email or '',
+            t.customer_mobile or '',
+            (t.description or '').replace('\n', ' '),
+            t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '',
+            t.updated_at.strftime('%Y-%m-%d %H:%M') if t.updated_at else '',
+        ]
         if t.form_data and isinstance(t.form_data, dict):
             for k in form_keys:
                 val = t.form_data.get(k, '')
                 if isinstance(val, list):
                     val = ', '.join(val)
-                row[k] = val or ''
+                row.append(val or '')
+        else:
+            row.extend([''] * len(form_keys))
         writer.writerow(row)
 
     output.seek(0)
