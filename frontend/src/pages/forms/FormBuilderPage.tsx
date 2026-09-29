@@ -214,7 +214,7 @@ export default function FormBuilderPage() {
                 >
                   <GripVertical className="w-3 h-3 text-gray-300 flex-shrink-0" />
                   <span className="flex-1 truncate">{f.label}</span>
-                  {f.depends_on && <Link2 className="w-3 h-3 text-blue-400 flex-shrink-0" title="Dependent field" />}
+                  {f.depends_on && <span title="Dependent field"><Link2 className="w-3 h-3 text-blue-400 flex-shrink-0" /></span>}
                   <span className="text-2xs text-gray-400">{f.field_type}</span>
                   <button className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600" onClick={e => { e.stopPropagation(); removeField(f.id) }}>
                     <Trash2 className="w-3 h-3" />
