@@ -72,8 +72,9 @@ export default function TicketNewPage() {
 
     // Filter options for dependent dropdowns
     const allOptions: any[] = field.options || []
+    const parentValNorm = parentVal.toLowerCase().replace(/\s+/g, '_')
     const options = dependsOn
-      ? allOptions.filter((o: any) => !o.show_when || o.show_when === parentVal)
+      ? allOptions.filter((o: any) => !o.show_when || o.show_when.toLowerCase() === parentValNorm)
       : allOptions
 
     // If dependent and no parent selected yet, show disabled placeholder

@@ -306,8 +306,9 @@ function DynField({ field, value, onChange, allValues = {} }: { field: FormField
 
   // Filter options for dependent fields
   const allOptions: any[] = (field.options || []) as any[]
+  const parentValNorm = parentVal.toLowerCase().replace(/\s+/g, '_')
   const options = dependsOn
-    ? allOptions.filter((o: any) => !o.show_when || o.show_when === parentVal)
+    ? allOptions.filter((o: any) => !o.show_when || o.show_when.toLowerCase() === parentValNorm)
     : allOptions
 
   if (dependsOn && !parentVal) {
