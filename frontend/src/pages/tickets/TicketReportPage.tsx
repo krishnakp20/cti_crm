@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ticketsApi } from '../../services/api'
+import { useState, useMemo } from 'react'
+import { useQuery, useQueries } from '@tanstack/react-query'
+import { ticketsApi, formsApi } from '../../services/api'
 import api from '../../services/api'
 import { useAdminClient } from '../../hooks/useAdminClient'
 import { Download, Filter, FileSpreadsheet, Loader2, RefreshCw } from 'lucide-react'
@@ -46,6 +46,30 @@ export default function TicketReportPage() {
   })
 
   const tickets = data?.items || []
+
+  // Collect unique form IDs from loaded tickets
+  const formIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const t of tickets) { if (t.form_id) ids.add(t.form_id) }
+    return Array.from(ids)
+  }, [tickets])
+
+  // Fetch fields for each form to build field_name → label map
+  const fieldQueries = useQueries({
+    queries: formIds.map(id => ({
+      queryKey: ['form-fields', id],
+      queryFn: () => formsApi.getFields(id).then((r: any) => r.data as Array<{ field_name: string; label: string }>),
+      staleTime: 60000,
+    })),
+  })
+
+  const fieldLabelMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const q of fieldQueries) {
+      if (q.data) { for (const f of q.data) { map[f.field_name] = f.label } }
+    }
+    return map
+  }, [fieldQueries])
 
   // Collect all unique form_data keys from loaded tickets
   const formKeys = (() => {
@@ -187,7 +211,7 @@ export default function TicketReportPage() {
                   <th className="th text-left px-3 py-2 whitespace-nowrap">Email</th>
                   {formKeys.map(k => (
                     <th key={k} className="th text-left px-3 py-2 whitespace-nowrap capitalize">
-                      {k.replace(/_/g, ' ')}
+                      {fieldLabelMap[k] || k.replace(/_/g, ' ')}
                     </th>
                   ))}
                   <th className="th text-left px-3 py-2 whitespace-nowrap">Created</th>
