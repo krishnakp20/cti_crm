@@ -46,6 +46,12 @@ function GuestRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function HomeRoute() {
+  const role = useSelector((s: RootState) => s.auth.user?.role)
+  if (role === 'agent') return <Navigate to="/agent" replace />
+  return <DashboardPage />
+}
+
 export default function App() {
   const theme = useSelector((s: RootState) => s.ui.theme)
 
@@ -61,7 +67,7 @@ export default function App() {
       </Route>
 
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={<HomeRoute />} />
         <Route path="/tickets" element={<TicketsPage />} />
         <Route path="/tickets/new" element={<TicketNewPage />} />
         <Route path="/tickets/report" element={<TicketReportPage />} />
