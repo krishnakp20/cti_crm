@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import select  # noqa: E402
-from app.core.database import AsyncSessionLocal  # noqa: E402
+from app.core.database import AsyncSessionLocal, engine  # noqa: E402
 from app.models.cdr import CallRecord  # noqa: E402
 from app.models.user import User  # noqa: E402
 
@@ -127,7 +127,7 @@ async def main():
             )).scalars().first()
         return users[ext]
 
-    updated = missing = 0
+    updated = missing = adopted = skipped = 0
     async with AsyncSessionLocal() as db:
         for uid, c in sorted(calls.items(), key=lambda kv: kv[1]["start"]):
             q = qlog.get(uid, {})
@@ -163,6 +163,34 @@ async def main():
             )).scalar_one_or_none()
 
             if rec is None:
+                if not ext and not q:
+                    skipped += 1
+                    print(f"IVR-ONLY {uid} {c['src']} {c['start'] + shift} (never queued, not recorded by design)")
+                    continue
+
+                # A ticket saved during the outage may have created a row with no Asterisk ID
+                when = fill.get("call_start_time") or (c["start"] + shift)
+                orphan = (await db.execute(
+                    select(CallRecord).where(
+                        CallRecord.asterisk_unique_id.is_(None),
+                        CallRecord.caller_number == c["src"],
+                        CallRecord.call_start_time >= when - timedelta(minutes=15),
+                        CallRecord.call_start_time <= when + timedelta(minutes=15),
+                    ).order_by(CallRecord.call_start_time)
+                )).scalars().first()
+
+                if orphan:
+                    adopted += 1
+                    print(f"ADOPT    {uid} {c['src']} -> existing row id={orphan.id} (ticket #{orphan.ticket_id})")
+                    if a.apply:
+                        orphan.asterisk_unique_id = uid
+                        for k, v in fill.items():
+                            if v is not None and not getattr(orphan, k):
+                                setattr(orphan, k, v)
+                        if not orphan.call_end_time:
+                            orphan.call_end_time = real_end
+                    continue
+
                 missing += 1
                 fill.setdefault("queue_start_time", c["start"] + shift)
                 print(f"MISSING  {uid} {c['src']} {c['start'] + shift} agent={ext} {verdict or c['disposition']}")
@@ -178,6 +206,9 @@ async def main():
             changes = {k: v for k, v in fill.items() if v is not None and not getattr(rec, k)}
             if rec.call_end_time is None or abs((rec.call_end_time - real_end).total_seconds()) > 60:
                 changes["call_end_time"] = real_end
+            if not verdict and not ext and not rec.agent_extension and not rec.call_start_time \
+                    and rec.call_status in ("initiated", "queued", "active", "answered", "completed"):
+                verdict = "abandoned"   # Master.csv shows no agent was ever dialed
             if verdict and rec.call_status != verdict:
                 changes["call_status"] = verdict
             if changes:
@@ -191,9 +222,17 @@ async def main():
             await db.commit()
 
     mode = "applied" if a.apply else "dry run, nothing written"
-    print(f"\nrows to update: {updated}   missing from DB: {missing}   ({mode})")
+    print(f"\nrows to update: {updated}   adopted into existing row: {adopted}   "
+          f"missing from DB: {missing}   IVR-only skipped: {skipped}   ({mode})")
     if missing and not (a.apply and a.insert_missing):
         print("Missing rows are only inserted with --apply --insert-missing")
 
 
-asyncio.run(main())
+async def run():
+    try:
+        await main()
+    finally:
+        await engine.dispose()
+
+
+asyncio.run(run())
