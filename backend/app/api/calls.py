@@ -774,3 +774,100 @@ async def originate_call(
     })
 
     return {"status": "ok", "call_uid": call_uid}
+
+
+# ── Manual Originate (no contact/campaign required) ──────────────────────────
+
+class ManualOriginateRequest(BaseModel):
+    destination: str
+    caller_id: Optional[str] = None
+
+
+@router.post("/originate/manual")
+async def manual_originate_call(
+    req: ManualOriginateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent manually dials a number from the dialpad — no contact/campaign required."""
+    from app.services.ami import ami_client
+    from app.models.cdr import CallRecord
+
+    ext = current_user.extension
+    if not ext:
+        raise HTTPException(400, "No extension configured. Set it in Agent Panel settings.")
+
+    dest = req.destination.strip().replace(" ", "").replace("-", "")
+    if not dest:
+        raise HTTPException(400, "Invalid destination number")
+
+    import time, uuid
+    call_uid = f"ob-{int(time.time())}-{uuid.uuid4().hex[:6]}"
+    caller_id_num = req.caller_id or ext
+
+    ami_lines = (
+        f"Action: Originate\r\n"
+        f"Channel: PJSIP/{ext}\r\n"
+        f"Context: from-internal\r\n"
+        f"Exten: {dest}\r\n"
+        f"Priority: 1\r\n"
+        f"Timeout: 30000\r\n"
+        f'CallerID: "{current_user.full_name}" <{caller_id_num}>\r\n'
+        f"Variable: OUTBOUND_AGENT={ext}\r\n"
+        f"ActionID: {call_uid}\r\n"
+        f"Async: true\r\n"
+        f"\r\n"
+    )
+    if ami_client._connected and ami_client.writer:
+        ami_client.writer.write(ami_lines.encode())
+        await ami_client.writer.drain()
+
+    cdr = CallRecord(
+        asterisk_unique_id=call_uid,
+        caller_number=dest,
+        agent_id=current_user.id,
+        agent_name=current_user.full_name,
+        agent_extension=ext,
+        direction="outbound",
+        call_status="initiated",
+        call_start_time=datetime.utcnow(),
+        client_id=current_user.client_id,
+    )
+    db.add(cdr)
+    await db.commit()
+
+    # Load agent form
+    from app.models.form import Form, FormField
+    form_data = None
+    if current_user.client_id:
+        form = (await db.execute(
+            select(Form).where(Form.client_id == current_user.client_id, Form.is_active == True)
+            .order_by(Form.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if form:
+            fields = (await db.execute(
+                select(FormField).where(FormField.form_id == form.id).order_by(FormField.order)
+            )).scalars().all()
+            form_data = {
+                "id": form.id, "name": form.name,
+                "fields": [
+                    {"id": f.id, "label": f.label, "field_name": f.field_name,
+                     "field_type": f.field_type.value if hasattr(f.field_type, "value") else str(f.field_type),
+                     "placeholder": f.placeholder, "options": f.options,
+                     "validations": f.validations,
+                     "is_required": f.is_required, "order": f.order}
+                    for f in fields
+                ],
+            }
+
+    from app.websocket.manager import manager
+    await manager.send_to_user(current_user.id, {
+        "type": "call_arrive",
+        "uniqueid": call_uid,
+        "caller_id": dest,
+        "caller_name": dest,
+        "direction": "outbound",
+        "form": form_data,
+    })
+
+    return {"status": "ok", "call_uid": call_uid}

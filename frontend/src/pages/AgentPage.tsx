@@ -428,6 +428,11 @@ export default function AgentPage() {
   const [wrapupTags, setWrapupTags] = useState<string[]>([])
   const [dispRequired, setDispRequired] = useState(false)
 
+  // Manual dialpad
+  const [showDialpad, setShowDialpad] = useState(false)
+  const [dialNumber, setDialNumber] = useState('')
+  const [manualDialing, setManualDialing] = useState(false)
+
   // Campaign dialer
   const [campaignList, setCampaignList] = useState<any[]>([])
   const [selectedCampaign, setSelectedCampaign] = useState<number | null>(null)
@@ -505,6 +510,22 @@ export default function AgentPage() {
       setDialingContactId(null)
     }
   }, [selectedCampaign])
+
+  const manualDial = useCallback(async () => {
+    const dest = dialNumber.trim().replace(/\s+/g, '').replace(/-/g, '')
+    if (!dest) { toast.error('Enter a phone number'); return }
+    setManualDialing(true)
+    try {
+      await api.post('/calls/originate/manual', { destination: dest })
+      toast.success(`Dialing ${dest}…`)
+      setShowDialpad(false)
+      setDialNumber('')
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || 'Failed to dial')
+    } finally {
+      setManualDialing(false)
+    }
+  }, [dialNumber])
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>
@@ -1190,6 +1211,68 @@ export default function AgentPage() {
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Manual Dial ──────────────────────────────────────────────────────── */}
+      {!activeCall && !wrapup && (
+        <div className="card">
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+            <button
+              onClick={() => setShowDialpad(v => !v)}
+              className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white"
+            >
+              <Phone className="w-4 h-4 text-green-600" />
+              Manual Dial
+              <ChevronRight className={cn('w-4 h-4 text-gray-400 transition-transform', showDialpad && 'rotate-90')} />
+            </button>
+          </div>
+          {showDialpad && (
+            <div className="p-4">
+              {/* Number display */}
+              <div className="flex items-center gap-2 mb-3">
+                <input
+                  type="tel"
+                  className="input flex-1 text-center text-lg font-mono tracking-widest"
+                  placeholder="Enter number"
+                  value={dialNumber}
+                  onChange={e => setDialNumber(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && manualDial()}
+                  autoFocus
+                />
+                {dialNumber && (
+                  <button
+                    onClick={() => setDialNumber(v => v.slice(0, -1))}
+                    className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                    title="Backspace"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {/* Dialpad grid */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
+                  <button
+                    key={k}
+                    onClick={() => setDialNumber(v => v + k)}
+                    className="py-3 rounded-xl text-base font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 active:scale-95 transition-all"
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+              {/* Dial button */}
+              <button
+                onClick={manualDial}
+                disabled={!dialNumber.trim() || manualDialing}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50"
+              >
+                <Phone className="w-4 h-4" />
+                {manualDialing ? 'Dialing…' : 'Dial'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
