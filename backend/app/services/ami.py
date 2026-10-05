@@ -41,15 +41,20 @@ class AMIClient:
                 pass
 
     async def connect(self):
-        try:
-            self.reader, self.writer = await asyncio.open_connection(AMI_HOST, AMI_PORT)
-            await self.reader.readline()   # AMI banner
-            await self._login()
-            self._connected = True
-            logger.info("AMI connected to %s:%s", AMI_HOST, AMI_PORT)
-            asyncio.create_task(self._read_loop())
-        except Exception as e:
-            logger.warning("AMI connect failed: %s", e)
+        delay = 5
+        while True:
+            try:
+                self.reader, self.writer = await asyncio.open_connection(AMI_HOST, AMI_PORT)
+                await self.reader.readline()   # AMI banner
+                await self._login()
+                self._connected = True
+                logger.info("AMI connected to %s:%s", AMI_HOST, AMI_PORT)
+                asyncio.create_task(self._read_loop())
+                return
+            except Exception as e:
+                logger.warning("AMI connect failed: %s — retrying in %ss", e, delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60)  # backoff: 5s, 10s, 20s, 40s, 60s max
 
     async def _login(self):
         self.writer.write(
@@ -78,8 +83,7 @@ class AMIClient:
                 logger.warning("AMI read error: %s", e)
                 break
         self._connected = False
-        logger.warning("AMI disconnected — will retry in 10s")
-        await asyncio.sleep(10)
+        logger.warning("AMI disconnected — reconnecting…")
         await self.connect()
 
     async def _handle_packet(self, pkt: dict):
