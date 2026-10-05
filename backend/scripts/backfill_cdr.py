@@ -63,13 +63,19 @@ def load_calls(path, since, until, channel_prefix):
     return calls
 
 
-def load_queue_log(path, since, until):
+def load_queue_log(paths, since, until):
     info = {}
-    if not os.path.exists(path):
-        print(f"queue_log not found at {path} - agent/queue details come from Master.csv only")
-        return info
     lo = calendar.timegm(since.timetuple()) - 3600
     hi = calendar.timegm(until.timetuple()) + 3600
+    for path in paths:
+        if not os.path.exists(path):
+            print(f"queue_log not found at {path} - skipped")
+            continue
+        _read_queue_log(path, lo, hi, info)
+    return info
+
+
+def _read_queue_log(path, lo, hi, info):
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             p = line.rstrip("\n").split("|")
@@ -96,13 +102,13 @@ def load_queue_log(path, since, until):
                     d["wait"] = int(data[2])
             elif ev in ("EXITWITHTIMEOUT", "EXITEMPTY", "EXITWITHKEY"):
                 d.setdefault("status", "no_answer")
-    return info
 
 
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default="/var/log/asterisk/cdr-csv/Master.csv")
-    ap.add_argument("--queue-log", default="/var/log/asterisk/queue_log")
+    ap.add_argument("--queue-log", nargs="+",
+                    default=["/var/log/asterisk/queue_log.1", "/var/log/asterisk/queue_log"])
     ap.add_argument("--since", required=True)
     ap.add_argument("--until", required=True)
     ap.add_argument("--channel-prefix", default="PJSIP/vicidial-trunk")
