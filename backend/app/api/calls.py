@@ -623,6 +623,28 @@ async def update_contact_status(
 
 # ── AMI Originate (outbound click-to-call) ───────────────────────────────────
 
+import re as _re
+
+_DEST_RE = _re.compile(r"^\+?[0-9*#]{2,20}$")
+_CID_RE = _re.compile(r"^\+?[0-9]{1,20}$")
+
+
+def _check_dest(raw: str) -> str:
+    dest = (raw or "").strip().replace(" ", "").replace("-", "")
+    if not _DEST_RE.match(dest):
+        raise HTTPException(400, "Invalid destination number")
+    return dest
+
+
+def _check_caller_id(raw: Optional[str]) -> Optional[str]:
+    if raw and not _CID_RE.match(raw):
+        raise HTTPException(400, "Invalid caller ID")
+    return raw
+
+
+def _ami_text(value: str) -> str:
+    return _re.sub(r'[\r\n"<>]', "", value or "")
+
 class OriginateRequest(BaseModel):
     contact_id: int
     campaign_id: int
@@ -648,10 +670,8 @@ async def originate_call(
     if not ext:
         raise HTTPException(400, "No extension configured. Set it in Agent Panel settings.")
 
-    # Normalize destination
-    dest = req.destination.strip().replace(" ", "").replace("-", "")
-    if not dest:
-        raise HTTPException(400, "Invalid destination number")
+    dest = _check_dest(req.destination)
+    _check_caller_id(req.caller_id)
 
     # Fetch contact for pre-fill data
     contact = (await db.execute(
@@ -684,7 +704,7 @@ async def originate_call(
         f"Exten: {dial_dest}\r\n"
         f"Priority: 1\r\n"
         f"Timeout: 30000\r\n"
-        f'CallerID: "{cid_name}" <{caller_id_num}>\r\n'
+        f'CallerID: "{_ami_text(cid_name)}" <{caller_id_num}>\r\n'
         f"Variable: OUTBOUND_AGENT={ext}\r\n"
         f"Variable: OUTBOUND_CONTACT={req.contact_id}\r\n"
         f"Variable: OUTBOUND_CAMPAIGN={req.campaign_id}\r\n"
@@ -797,9 +817,8 @@ async def manual_originate_call(
     if not ext:
         raise HTTPException(400, "No extension configured. Set it in Agent Panel settings.")
 
-    dest = req.destination.strip().replace(" ", "").replace("-", "")
-    if not dest:
-        raise HTTPException(400, "Invalid destination number")
+    dest = _check_dest(req.destination)
+    _check_caller_id(req.caller_id)
 
     import time, uuid
     call_uid = f"ob-{int(time.time())}-{uuid.uuid4().hex[:6]}"
@@ -812,7 +831,7 @@ async def manual_originate_call(
         f"Exten: {dest}\r\n"
         f"Priority: 1\r\n"
         f"Timeout: 30000\r\n"
-        f'CallerID: "{current_user.full_name}" <{caller_id_num}>\r\n'
+        f'CallerID: "{_ami_text(current_user.full_name)}" <{caller_id_num}>\r\n'
         f"Variable: OUTBOUND_AGENT={ext}\r\n"
         f"ActionID: {call_uid}\r\n"
         f"Async: true\r\n"
