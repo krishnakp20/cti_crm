@@ -48,7 +48,13 @@ async def init_db():
 def _add_missing_columns(sync_conn):
     from sqlalchemy import inspect, text
     # create_all never alters existing tables; add columns introduced after first deploy
-    wanted = [("ivr_routes", "voicemail_mailbox", "VARCHAR(100) NULL")]
+    wanted = [
+        ("ivr_routes", "voicemail_mailbox", "VARCHAR(100) NULL"),
+        ("ivr_configs", "hours_enabled", "TINYINT(1) NOT NULL DEFAULT 0"),
+        ("ivr_configs", "timezone", "VARCHAR(50) NULL"),
+        ("ivr_configs", "schedule", "JSON NULL"),
+        ("ivr_configs", "closed_audio", "VARCHAR(255) NULL"),
+    ]
     insp = inspect(sync_conn)
     for table, column, ddl in wanted:
         existing = {c["name"] for c in insp.get_columns(table)}

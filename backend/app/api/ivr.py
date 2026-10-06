@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import Optional
 import re
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, field_validator
 
 from app.core.database import get_db
@@ -80,6 +81,48 @@ def _route_dict(r: IVRRoute, agents: dict) -> dict:
     }
 
 
+_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_AUDIO = re.compile(r"^[A-Za-z0-9_./-]{1,200}$")
+DEFAULT_TZ = "Asia/Kolkata"
+
+
+def _clean_schedule(raw) -> dict:
+    """Keep only open days. Raises ValueError on a bad shape or time."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("schedule must be an object keyed by day")
+    out = {}
+    for day, slot in raw.items():
+        if day not in _DAYS:
+            raise ValueError(f"unknown day '{day}'")
+        if not slot:
+            continue
+        o, c = str(slot.get("open", "")), str(slot.get("close", ""))
+        if not _HHMM.match(o) or not _HHMM.match(c):
+            raise ValueError(f"{day}: times must be HH:MM")
+        if o >= c:
+            raise ValueError(f"{day}: closing time must be after opening time")
+        out[day] = {"open": o, "close": c}
+    return out
+
+
+def _now_in_tz(tz_name: Optional[str]) -> datetime:
+    from zoneinfo import ZoneInfo
+    try:
+        return datetime.now(ZoneInfo(tz_name or DEFAULT_TZ))
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=5, minutes=30)))
+
+
+def _is_open(schedule: Optional[dict], now: datetime) -> bool:
+    slot = (schedule or {}).get(_DAYS[now.weekday()])
+    if not slot:
+        return False
+    return slot["open"] <= now.strftime("%H:%M") < slot["close"]
+
+
 async def _agent_map(db: AsyncSession, agent_ids: list) -> dict:
     if not agent_ids:
         return {}
@@ -106,7 +149,9 @@ async def list_configs(
     configs = (await db.execute(q)).scalars().all()
     return [{"id": c.id, "client_id": c.client_id, "name": c.name,
              "welcome_audio": c.welcome_audio, "ring_timeout": c.ring_timeout,
-             "is_active": c.is_active} for c in configs]
+             "is_active": c.is_active, "hours_enabled": bool(c.hours_enabled),
+             "timezone": c.timezone or DEFAULT_TZ, "schedule": c.schedule or {},
+             "closed_audio": c.closed_audio} for c in configs]
 
 
 @router.post("/configs")
@@ -136,9 +181,33 @@ async def update_config(
     cfg = await db.get(IVRConfig, config_id)
     if not cfg:
         raise HTTPException(404)
+    if current_user.role != UserRole.ADMIN and cfg.client_id != current_user.client_id:
+        raise HTTPException(403, "Not your IVR config")
+
+    allowed = {"name", "welcome_audio", "ring_timeout", "is_active",
+               "hours_enabled", "timezone", "schedule", "closed_audio"}
     for k, v in body.items():
-        if hasattr(cfg, k):
-            setattr(cfg, k, v)
+        if k not in allowed:
+            continue
+        if k == "schedule":
+            try:
+                v = _clean_schedule(v)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+        elif k == "timezone":
+            from zoneinfo import ZoneInfo
+            try:
+                ZoneInfo(v or DEFAULT_TZ)
+            except Exception:
+                raise HTTPException(400, f"Unknown time zone '{v}'")
+            v = v or DEFAULT_TZ
+        elif k in ("closed_audio", "welcome_audio"):
+            v = (v or "").strip() or None
+            if v and (not _AUDIO.match(v) or ".." in v):
+                raise HTTPException(400, f"{k}: use a sounds path like custom/Zarf_Closed")
+        elif k == "hours_enabled":
+            v = bool(v)
+        setattr(cfg, k, v)
     await db.commit()
     return {"ok": True}
 
@@ -370,7 +439,24 @@ async def clear_override(
     return {"ok": True}
 
 
-# ── AGI lookup endpoint (called by Asterisk AGI script) ───────────────────────
+# ── AGI lookup endpoints (called by Asterisk AGI scripts) ─────────────────────
+
+@router.get("/hours")
+async def agi_hours(client_id: int, db: AsyncSession = Depends(get_db)):
+    """Is this client open right now? Called at the start of every IVR call."""
+    cfg = (await db.execute(
+        select(IVRConfig).where(
+            IVRConfig.client_id == client_id,
+            IVRConfig.is_active == True,
+        ).limit(1)
+    )).scalar_one_or_none()
+    if not cfg or not cfg.hours_enabled:
+        return {"open": True}
+    return {
+        "open": _is_open(cfg.schedule, _now_in_tz(cfg.timezone)),
+        "closed_audio": cfg.closed_audio,
+    }
+
 
 @router.get("/lookup")
 async def agi_lookup(

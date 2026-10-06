@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ivrApi, usersApi, clientsApi } from '../services/api'
 import { useSelector } from 'react-redux'
 import { RootState } from '../redux/store'
 import { useAdminClient } from '../hooks/useAdminClient'
-import { Phone, Plus, Edit2, Trash2, AlertTriangle, Check, X, ToggleLeft, ToggleRight, Loader2 } from 'lucide-react'
+import { Phone, Plus, Edit2, Trash2, AlertTriangle, Check, X, ToggleLeft, ToggleRight, Loader2, Clock, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { cn } from '../utils/cn'
 
@@ -16,6 +16,34 @@ const BACKUP_TYPES = [
 ]
 
 const PRESS_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+
+const DAYS: [string, string][] = [
+  ['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'],
+  ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday'],
+]
+const TIMEZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'America/New_York', 'UTC']
+
+type DayHours = { open: boolean; from: string; to: string }
+
+function buildHours(cfg: any) {
+  const saved: Record<string, any> = cfg?.schedule ?? {}
+  const configured = Object.keys(saved).length > 0
+  const schedule: Record<string, DayHours> = {}
+  DAYS.forEach(([d]) => {
+    const s = saved[d]
+    schedule[d] = {
+      open: configured ? !!s : ['mon', 'tue', 'wed', 'thu', 'fri'].includes(d),
+      from: s?.open ?? '09:00',
+      to: s?.close ?? '18:00',
+    }
+  })
+  return {
+    enabled: !!cfg?.hours_enabled,
+    timezone: cfg?.timezone || 'Asia/Kolkata',
+    closedAudio: cfg?.closed_audio ?? '',
+    schedule,
+  }
+}
 
 function emptyRoute(configId: number) {
   return {
@@ -58,6 +86,39 @@ export default function IVRRoutingPage() {
   // Auto-select first config once loaded; reset when top-bar client changes
   const activeConfigId: number | null = selectedConfig ?? (configs.length > 0 ? configs[0].id : null)
   const activeConfig: any = configs.find((c: any) => c.id === activeConfigId) ?? null
+
+  // Office hours draft for the selected config
+  const [hours, setHours] = useState<ReturnType<typeof buildHours> | null>(null)
+  const [showHours, setShowHours] = useState(false)
+  useEffect(() => { setHours(activeConfig ? buildHours(activeConfig) : null) }, [activeConfig])
+
+  const saveHoursMutation = useMutation({
+    mutationFn: (data: any) => ivrApi.updateConfig(activeConfigId!, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['ivr-configs'] }); toast.success('Office hours saved') },
+    onError: (e: any) => toast.error(e?.response?.data?.detail || 'Failed to save office hours'),
+  })
+
+  const saveHours = () => {
+    if (!hours) return
+    const schedule: Record<string, { open: string; close: string }> = {}
+    DAYS.forEach(([d]) => {
+      const s = hours.schedule[d]
+      if (s.open) schedule[d] = { open: s.from, close: s.to }
+    })
+    if (hours.enabled && Object.keys(schedule).length === 0) {
+      toast.error('Select at least one open day, otherwise every call hears the closed message')
+      return
+    }
+    saveHoursMutation.mutate({
+      hours_enabled: hours.enabled,
+      timezone: hours.timezone,
+      closed_audio: hours.closedAudio.trim() || null,
+      schedule,
+    })
+  }
+
+  const setDay = (d: string, patch: Partial<DayHours>) =>
+    setHours(h => h ? { ...h, schedule: { ...h.schedule, [d]: { ...h.schedule[d], ...patch } } } : h)
 
   // Fetch routes for selected config
   const { data: routes = [], isLoading: loadingRoutes } = useQuery({
@@ -216,6 +277,93 @@ export default function IVRRoutingPage() {
               {c.name}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Office hours */}
+      {activeConfigId && hours && (
+        <div className="card">
+          <button
+            type="button"
+            onClick={() => setShowHours(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-900 dark:text-white"
+          >
+            <span className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-primary-600" />
+              Office Hours
+              <span className={cn('badge', activeConfig?.hours_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                {activeConfig?.hours_enabled ? 'On' : 'Off — open 24 hours'}
+              </span>
+            </span>
+            <ChevronRight className={cn('w-4 h-4 text-gray-400 transition-transform', showHours && 'rotate-90')} />
+          </button>
+
+          {showHours && (
+            <div className="border-t border-gray-100 dark:border-gray-800 p-4 space-y-4">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hours.enabled}
+                  onChange={e => setHours(h => h ? { ...h, enabled: e.target.checked } : h)}
+                />
+                Enable office hours — callers outside these hours hear the closed message and the call ends
+              </label>
+
+              <div className={cn('grid gap-4 lg:grid-cols-2', !hours.enabled && 'opacity-50 pointer-events-none')}>
+                <div className="space-y-1.5">
+                  {DAYS.map(([d, label]) => {
+                    const s = hours.schedule[d]
+                    return (
+                      <div key={d} className="flex items-center gap-3 text-sm">
+                        <label className="flex items-center gap-2 w-36 flex-shrink-0 cursor-pointer">
+                          <input type="checkbox" checked={s.open} onChange={e => setDay(d, { open: e.target.checked })} />
+                          {label}
+                        </label>
+                        {s.open ? (
+                          <div className="flex items-center gap-2">
+                            <input type="time" className="input text-xs py-1 px-2 h-8 !w-28" value={s.from} onChange={e => setDay(d, { from: e.target.value })} />
+                            <span className="text-gray-400 text-xs">to</span>
+                            <input type="time" className="input text-xs py-1 px-2 h-8 !w-28" value={s.to} onChange={e => setDay(d, { to: e.target.value })} />
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">Closed</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="label">Time zone</label>
+                    <select
+                      className="input"
+                      value={hours.timezone}
+                      onChange={e => setHours(h => h ? { ...h, timezone: e.target.value } : h)}
+                    >
+                      {TIMEZONES.map(z => <option key={z} value={z}>{z}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Closed message audio</label>
+                    <input
+                      className="input"
+                      value={hours.closedAudio}
+                      onChange={e => setHours(h => h ? { ...h, closedAudio: e.target.value } : h)}
+                      placeholder="custom/Zarf_Closed (without extension)"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Path under the Asterisk sounds folder. Leave empty to play a plain "thank you for calling".</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button className="btn btn-primary text-xs" onClick={saveHours} disabled={saveHoursMutation.isPending}>
+                  {saveHoursMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save office hours'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

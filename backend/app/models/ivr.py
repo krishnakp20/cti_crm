@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Integer, Enum, func, Text
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Integer, Enum, func, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 import enum
@@ -22,6 +22,11 @@ class IVRConfig(Base):
     welcome_audio: Mapped[Optional[str]] = mapped_column(String(255))
     ring_timeout: Mapped[int] = mapped_column(Integer, default=30)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Office hours: {"mon": {"open": "10:00", "close": "18:00"}, ...}; a missing day is closed
+    hours_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    timezone: Mapped[Optional[str]] = mapped_column(String(50))
+    schedule: Mapped[Optional[dict]] = mapped_column(JSON)
+    closed_audio: Mapped[Optional[str]] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
