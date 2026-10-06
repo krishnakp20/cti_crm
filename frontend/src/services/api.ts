@@ -160,6 +160,12 @@ export const ivrApi = {
   listConfigs: (params?: any) => api.get('/ivr/configs', { params }),
   createConfig: (data: any) => api.post('/ivr/configs', data),
   updateConfig: (id: number, data: any) => api.put(`/ivr/configs/${id}`, data),
+  uploadClosedAudio: (id: number, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post(`/ivr/configs/${id}/closed-audio`, fd)
+  },
+  getClosedAudio: (id: number) => api.get(`/ivr/configs/${id}/closed-audio`, { responseType: 'blob' }),
   listRoutes: (configId: number) => api.get(`/ivr/configs/${configId}/routes`),
   addRoute: (configId: number, data: any) => api.post(`/ivr/configs/${configId}/routes`, data),
   updateRoute: (routeId: number, data: any) => api.put(`/ivr/routes/${routeId}`, data),

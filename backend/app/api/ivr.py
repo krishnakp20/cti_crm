@@ -1,4 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+import io
+import os
+import wave
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -85,6 +90,57 @@ _DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _AUDIO = re.compile(r"^[A-Za-z0-9_./-]{1,200}$")
 DEFAULT_TZ = "Asia/Kolkata"
+
+# Backend and Asterisk run on the same server; uploads are written straight into Asterisk's sounds folder
+SOUNDS_ROOT = Path(os.getenv("ASTERISK_SOUNDS_ROOT", "/var/lib/asterisk/sounds"))
+UPLOAD_SUBDIR = "custom"
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_AUDIO_SECONDS = 300
+
+
+def _valid_audio(v: str) -> bool:
+    return bool(_AUDIO.match(v)) and ".." not in v and not v.startswith("/")
+
+
+def _to_telephony_wav(raw: bytes) -> tuple[bytes, float]:
+    """Return (8 kHz mono 16-bit PCM WAV bytes, seconds). Raises ValueError with a user-facing message."""
+    try:
+        with wave.open(io.BytesIO(raw), "rb") as w:
+            channels, width = w.getnchannels(), w.getsampwidth()
+            rate, frames = w.getframerate(), w.getnframes()
+            if frames == 0 or rate <= 0:
+                raise ValueError("The audio file is empty")
+            if frames / rate > MAX_AUDIO_SECONDS:
+                raise ValueError("The audio is longer than 5 minutes")
+            data = w.readframes(frames)
+    except (wave.Error, EOFError):
+        raise ValueError("Not a PCM WAV file. Export it as WAV (16-bit PCM) and try again")
+    if channels not in (1, 2):
+        raise ValueError("Only mono or stereo WAV files are supported")
+
+    try:
+        import audioop
+    except ImportError:
+        if (channels, width, rate) != (1, 2, 8000):
+            raise ValueError("Please upload an 8000 Hz, mono, 16-bit WAV file")
+        return raw, frames / rate
+
+    if width == 1:                      # 8-bit WAV is unsigned
+        data = audioop.bias(data, 1, -128)
+    if width != 2:
+        data = audioop.lin2lin(data, width, 2)
+    if channels == 2:
+        data = audioop.tomono(data, 2, 0.5, 0.5)
+    if rate != 8000:
+        data, _ = audioop.ratecv(data, 2, 1, rate, 8000, None)
+
+    out = io.BytesIO()
+    with wave.open(out, "wb") as o:
+        o.setnchannels(1)
+        o.setsampwidth(2)
+        o.setframerate(8000)
+        o.writeframes(data)
+    return out.getvalue(), len(data) / 2 / 8000
 
 
 def _clean_schedule(raw) -> dict:
@@ -203,13 +259,72 @@ async def update_config(
             v = v or DEFAULT_TZ
         elif k in ("closed_audio", "welcome_audio"):
             v = (v or "").strip() or None
-            if v and (not _AUDIO.match(v) or ".." in v):
+            if v and not _valid_audio(v):
                 raise HTTPException(400, f"{k}: use a sounds path like custom/Zarf_Closed")
         elif k == "hours_enabled":
             v = bool(v)
         setattr(cfg, k, v)
     await db.commit()
     return {"ok": True}
+
+
+async def _config_for_user(db: AsyncSession, config_id: int, user: User) -> IVRConfig:
+    if user.role not in (UserRole.ADMIN, UserRole.CLIENT):
+        raise HTTPException(403, "Insufficient permissions")
+    cfg = await db.get(IVRConfig, config_id)
+    if not cfg:
+        raise HTTPException(404)
+    if user.role != UserRole.ADMIN and cfg.client_id != user.client_id:
+        raise HTTPException(403, "Not your IVR config")
+    return cfg
+
+
+@router.post("/configs/{config_id}/closed-audio")
+async def upload_closed_audio(
+    config_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cfg = await _config_for_user(db, config_id, current_user)
+
+    raw = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "File is larger than 10 MB")
+    try:
+        wav, seconds = _to_telephony_wav(raw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    name = f"closed-{cfg.client_id}-{cfg.id}"
+    dest_dir = SOUNDS_ROOT / UPLOAD_SUBDIR
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        tmp = dest_dir / f".{name}.tmp"
+        tmp.write_bytes(wav)
+        os.chmod(tmp, 0o644)                        # Asterisk runs as another user and must be able to read it
+        os.replace(tmp, dest_dir / f"{name}.wav")   # swap in whole, never a half-written file
+    except OSError as e:
+        raise HTTPException(500, f"Could not save the audio on the server: {e.strerror or e}")
+
+    cfg.closed_audio = f"{UPLOAD_SUBDIR}/{name}"
+    await db.commit()
+    return {"closed_audio": cfg.closed_audio, "seconds": round(seconds, 1)}
+
+
+@router.get("/configs/{config_id}/closed-audio")
+async def get_closed_audio(
+    config_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cfg = await _config_for_user(db, config_id, current_user)
+    if not cfg.closed_audio or not _valid_audio(cfg.closed_audio):
+        raise HTTPException(404, "No closed message set")
+    path = (SOUNDS_ROOT / f"{cfg.closed_audio}.wav").resolve()
+    if SOUNDS_ROOT.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(404, "Audio file not found on the server")
+    return FileResponse(path, media_type="audio/wav")
 
 
 # ── Route endpoints ───────────────────────────────────────────────────────────

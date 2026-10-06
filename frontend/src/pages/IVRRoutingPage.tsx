@@ -4,7 +4,7 @@ import { ivrApi, usersApi, clientsApi } from '../services/api'
 import { useSelector } from 'react-redux'
 import { RootState } from '../redux/store'
 import { useAdminClient } from '../hooks/useAdminClient'
-import { Phone, Plus, Edit2, Trash2, AlertTriangle, Check, X, ToggleLeft, ToggleRight, Loader2, Clock, ChevronRight } from 'lucide-react'
+import { Phone, Plus, Edit2, Trash2, AlertTriangle, Check, X, ToggleLeft, ToggleRight, Loader2, Clock, ChevronRight, Upload, Play } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { cn } from '../utils/cn'
 
@@ -115,6 +115,40 @@ export default function IVRRoutingPage() {
       closed_audio: hours.closedAudio.trim() || null,
       schedule,
     })
+  }
+
+  const [uploadingAudio, setUploadingAudio] = useState(false)
+  const [playingAudio, setPlayingAudio] = useState(false)
+
+  const uploadClosedAudio = async (file: File | undefined) => {
+    if (!file || !activeConfigId) return
+    setUploadingAudio(true)
+    try {
+      const res = await ivrApi.uploadClosedAudio(activeConfigId, file)
+      setHours(h => h ? { ...h, closedAudio: res.data.closed_audio } : h)
+      qc.invalidateQueries({ queryKey: ['ivr-configs'] })
+      toast.success(`Closed message uploaded (${res.data.seconds}s)`)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || 'Upload failed')
+    } finally {
+      setUploadingAudio(false)
+    }
+  }
+
+  const playClosedAudio = async () => {
+    if (!activeConfigId) return
+    setPlayingAudio(true)
+    try {
+      const res = await ivrApi.getClosedAudio(activeConfigId)
+      const url = URL.createObjectURL(res.data)
+      const audio = new Audio(url)
+      audio.onended = () => { URL.revokeObjectURL(url); setPlayingAudio(false) }
+      audio.onerror = () => { URL.revokeObjectURL(url); setPlayingAudio(false) }
+      await audio.play()
+    } catch {
+      setPlayingAudio(false)
+      toast.error('No saved closed message to play yet')
+    }
   }
 
   const setDay = (d: string, patch: Partial<DayHours>) =>
@@ -309,12 +343,12 @@ export default function IVRRoutingPage() {
                 Enable office hours — callers outside these hours hear the closed message and the call ends
               </label>
 
-              <div className={cn('grid gap-4 lg:grid-cols-2', !hours.enabled && 'opacity-50 pointer-events-none')}>
-                <div className="space-y-1.5">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className={cn('space-y-1.5 min-w-0', !hours.enabled && 'opacity-50 pointer-events-none')}>
                   {DAYS.map(([d, label]) => {
                     const s = hours.schedule[d]
                     return (
-                      <div key={d} className="flex items-center gap-3 text-sm">
+                      <div key={d} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                         <label className="flex items-center gap-2 w-36 flex-shrink-0 cursor-pointer">
                           <input type="checkbox" checked={s.open} onChange={e => setDay(d, { open: e.target.checked })} />
                           {label}
@@ -333,8 +367,8 @@ export default function IVRRoutingPage() {
                   })}
                 </div>
 
-                <div className="space-y-3">
-                  <div>
+                <div className="space-y-3 min-w-0">
+                  <div className={cn(!hours.enabled && 'opacity-50 pointer-events-none')}>
                     <label className="label">Time zone</label>
                     <select
                       className="input"
@@ -352,7 +386,28 @@ export default function IVRRoutingPage() {
                       onChange={e => setHours(h => h ? { ...h, closedAudio: e.target.value } : h)}
                       placeholder="custom/Zarf_Closed (without extension)"
                     />
-                    <p className="text-xs text-gray-400 mt-1">Path under the Asterisk sounds folder. Leave empty to play a plain "thank you for calling".</p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <label className={cn('btn btn-outline text-xs cursor-pointer', uploadingAudio && 'opacity-60 pointer-events-none')}>
+                        {uploadingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Upload className="w-3.5 h-3.5 mr-1" />}
+                        Upload WAV
+                        <input
+                          type="file"
+                          accept=".wav,audio/wav,audio/x-wav"
+                          className="hidden"
+                          onChange={e => { uploadClosedAudio(e.target.files?.[0]); e.target.value = '' }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="btn btn-outline text-xs"
+                        onClick={playClosedAudio}
+                        disabled={!hours.closedAudio || playingAudio}
+                      >
+                        {playingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Play className="w-3.5 h-3.5 mr-1" />}
+                        Play
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Upload a WAV file (any sample rate, it is converted for phone lines) or type a path under the Asterisk sounds folder. Leave empty to play a plain "thank you for calling".</p>
                   </div>
                 </div>
               </div>
