@@ -191,7 +191,7 @@ function useWebRTCSoftphone(
       uri: `sip:${config.extension}@${config.domain}`,
       password: config.password,
       register: true,
-      register_expires: 300,
+      register_expires: 90,
       contact_uri: `sip:${config.extension}@${config.domain};transport=ws`,
     })
     uaRef.current = ua
