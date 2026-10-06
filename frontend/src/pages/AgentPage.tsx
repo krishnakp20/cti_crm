@@ -429,7 +429,6 @@ export default function AgentPage() {
   const [dispRequired, setDispRequired] = useState(false)
 
   // Manual dialpad
-  const [showDialpad, setShowDialpad] = useState(false)
   const [dialNumber, setDialNumber] = useState('')
   const [manualDialing, setManualDialing] = useState(false)
 
@@ -442,7 +441,7 @@ export default function AgentPage() {
   const [campaignPage, setCampaignPage] = useState(1)
   const [campaignStatusFilter, setCampaignStatusFilter] = useState('')
   const [dialingContactId, setDialingContactId] = useState<number | null>(null)
-  const [showCampaignTab, setShowCampaignTab] = useState(false)
+  const [showCampaignTab, setShowCampaignTab] = useState(true)
 
   const [showExtModal, setShowExtModal] = useState(false)
   const [extension, setExtension] = useState('')
@@ -518,7 +517,6 @@ export default function AgentPage() {
     try {
       await api.post('/calls/originate/manual', { destination: dest })
       toast.success(`Dialing ${dest}…`)
-      setShowDialpad(false)
       setDialNumber('')
     } catch (e: any) {
       toast.error(e?.response?.data?.detail || 'Failed to dial')
@@ -801,7 +799,7 @@ export default function AgentPage() {
   const micPending = micState === 'prompt' || micState === 'checking'
 
   return (
-    <div className="space-y-4 max-w-5xl">
+    <div className="space-y-3 max-w-6xl">
 
       {/* ── MICROPHONE DENIED BANNER ───────────────────────────────────────── */}
       {(micBlocked || micPending) && micState !== 'checking' && (
@@ -922,13 +920,13 @@ export default function AgentPage() {
             <div className="flex gap-3">
               <button
                 onClick={() => setActiveCallWithSync(null)}
-                className="flex-1 px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="flex-1 px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
                 Dismiss Call
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors"
+                className="flex-1 px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors"
               >
                 Reload Page
               </button>
@@ -1066,17 +1064,17 @@ export default function AgentPage() {
       </div>
 
       {/* ── Stats ─────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="card grid grid-cols-3 divide-x divide-gray-100 dark:divide-gray-800">
         {[
           { label: 'Open Tickets',    value: openTickets,          icon: Ticket,   color: 'text-primary-600 bg-primary-50' },
           { label: 'Today Callbacks', value: todayCallbacks,       icon: Calendar, color: 'text-orange-600 bg-orange-50' },
           { label: 'Calls Today',     value: todayCdr?.total || 0, icon: Phone,    color: 'text-blue-600 bg-blue-50' },
         ].map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="card p-3 flex items-center gap-3">
-            <div className={cn('p-2 rounded-lg', color)}><Icon className="w-4 h-4" /></div>
-            <div>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">{value}</p>
-              <p className="text-2xs text-gray-500">{label}</p>
+          <div key={label} className="px-3 py-2 flex items-center gap-3 min-w-0">
+            <div className={cn('p-1.5 rounded-lg flex-shrink-0', color)}><Icon className="w-4 h-4" /></div>
+            <div className="min-w-0">
+              <p className="text-lg font-bold leading-tight text-gray-900 dark:text-white">{value}</p>
+              <p className="text-2xs text-gray-500 truncate">{label}</p>
             </div>
           </div>
         ))}
@@ -1214,21 +1212,17 @@ export default function AgentPage() {
         </div>
       )}
 
+      {/* ── Dialer row: Manual Dial (left) + Campaign / Tickets (right) ───────── */}
+      <div className={cn('grid gap-3 items-start', !activeCall && !wrapup && 'lg:grid-cols-[17rem_minmax(0,1fr)]')}>
+
       {/* ── Manual Dial ──────────────────────────────────────────────────────── */}
       {!activeCall && !wrapup && (
-        <div className="card">
-          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-            <button
-              onClick={() => setShowDialpad(v => !v)}
-              className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white"
-            >
-              <Phone className="w-4 h-4 text-green-600" />
-              Manual Dial
-              <ChevronRight className={cn('w-4 h-4 text-gray-400 transition-transform', showDialpad && 'rotate-90')} />
-            </button>
+        <div className="card lg:sticky lg:top-4">
+          <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
+            <Phone className="w-4 h-4 text-green-600" />
+            Manual Dial
           </div>
-          {showDialpad && (
-            <div className="p-5 flex justify-center">
+            <div className="p-4 flex justify-center">
               <div className="w-full max-w-[17rem]">
                 {/* Number display */}
                 <div className="relative mb-4">
@@ -1275,26 +1269,27 @@ export default function AgentPage() {
                 </button>
               </div>
             </div>
-          )}
         </div>
       )}
+
+      <div className="space-y-3 min-w-0">
 
       {/* ── Campaign Dialer ───────────────────────────────────────────────────── */}
       {campaignList.length > 0 && (
         <div className="card">
-          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+          <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
             <button
               onClick={() => setShowCampaignTab(v => !v)}
-              className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white"
+              className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white whitespace-nowrap"
             >
               <PhoneOutgoing className="w-4 h-4 text-purple-600" />
               Campaign Dialer
               <ChevronRight className={cn('w-4 h-4 text-gray-400 transition-transform', showCampaignTab && 'rotate-90')} />
             </button>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {/* Campaign selector */}
               <select
-                className="input text-xs py-1 px-2 h-7"
+                className="input text-xs py-1 px-2 h-7 !w-36"
                 value={selectedCampaign || ''}
                 onChange={e => { setSelectedCampaign(Number(e.target.value)); setCampaignPage(1) }}
               >
@@ -1302,7 +1297,7 @@ export default function AgentPage() {
               </select>
               {/* Status filter */}
               <select
-                className="input text-xs py-1 px-2 h-7"
+                className="input text-xs py-1 px-2 h-7 !w-24"
                 value={campaignStatusFilter}
                 onChange={e => { setCampaignStatusFilter(e.target.value); setCampaignPage(1) }}
               >
@@ -1318,7 +1313,7 @@ export default function AgentPage() {
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
-              <span className="text-xs text-gray-400">{campaignTotal} contacts</span>
+              <span className="text-xs text-gray-400 whitespace-nowrap">{campaignTotal} contacts</span>
             </div>
           </div>
 
@@ -1343,12 +1338,12 @@ export default function AgentPage() {
                       <tr><td colSpan={6 + campaignContactFields.length} className="text-center py-8 text-gray-400">No contacts found</td></tr>
                     ) : campaignContacts.map((c: any) => (
                       <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
-                        <td className="px-4 py-2.5 font-medium text-gray-800 dark:text-gray-200">{c.name || '—'}</td>
-                        <td className="px-4 py-2.5 text-gray-600 dark:text-gray-400 font-mono">{c.mobile}</td>
+                        <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">{c.name || '—'}</td>
+                        <td className="px-3 py-2 text-gray-600 dark:text-gray-400 font-mono">{c.mobile}</td>
                         {campaignContactFields.map(f => (
-                          <td key={f} className="px-4 py-2.5 text-gray-500 max-w-[120px] truncate">{c.extra_data?.[f] || '—'}</td>
+                          <td key={f} className="px-3 py-2 text-gray-500 max-w-[120px] truncate">{c.extra_data?.[f] || '—'}</td>
                         ))}
-                        <td className="px-4 py-2.5">
+                        <td className="px-3 py-2">
                           <span className={cn(
                             'inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-semibold',
                             c.status === 'pending' ? 'bg-blue-100 text-blue-700' :
@@ -1358,8 +1353,8 @@ export default function AgentPage() {
                             'bg-gray-100 text-gray-600'
                           )}>{c.status}</span>
                         </td>
-                        <td className="px-4 py-2.5 text-gray-400">{c.call_count}</td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="px-3 py-2 text-gray-400">{c.call_count}</td>
+                        <td className="px-3 py-2 text-right">
                           <button
                             onClick={() => dialContact(c)}
                             disabled={!!activeCall || !!wrapup || dialingContactId === c.id}
@@ -1405,18 +1400,18 @@ export default function AgentPage() {
       )}
 
       {/* ── Tickets + Callbacks ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="card">
           <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">My Tickets</h3>
             <span className="badge bg-primary-100 text-primary-700">{openTickets} open</span>
           </div>
-          <div className="divide-y divide-gray-50 dark:divide-gray-800 max-h-72 overflow-y-auto">
+          <div className="divide-y divide-gray-50 dark:divide-gray-800 max-h-56 overflow-y-auto">
             {(tickets?.items || []).length === 0 ? (
               <p className="text-xs text-gray-400 text-center py-8">No tickets assigned</p>
             ) : (
               (tickets?.items || []).slice(0, 10).map((t: any) => (
-                <div key={t.id} className="px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer group" onClick={() => navigate(`/tickets/${t.id}`)}>
+                <div key={t.id} className="px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer group" onClick={() => navigate(`/tickets/${t.id}`)}>
                   <div className="flex items-center justify-between">
                     <span className="text-2xs font-mono text-primary-600">{t.ticket_number}</span>
                     <div className="flex items-center gap-1.5">
@@ -1441,12 +1436,12 @@ export default function AgentPage() {
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Upcoming Callbacks</h3>
             <span className="badge bg-orange-100 text-orange-700">{todayCallbacks} today</span>
           </div>
-          <div className="divide-y divide-gray-50 dark:divide-gray-800 max-h-72 overflow-y-auto">
+          <div className="divide-y divide-gray-50 dark:divide-gray-800 max-h-56 overflow-y-auto">
             {(callbacks || []).length === 0 ? (
               <p className="text-xs text-gray-400 text-center py-8">No callbacks scheduled</p>
             ) : (
               (callbacks || []).slice(0, 8).map((cb: any) => (
-                <div key={cb.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                <div key={cb.id} className="px-3 py-2 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
                   <div className="w-8 h-8 rounded-full bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center flex-shrink-0">
                     <Phone className="w-3.5 h-3.5 text-orange-600" />
                   </div>
@@ -1465,6 +1460,8 @@ export default function AgentPage() {
         </div>
       </div>
 
+      </div>
+      </div>
 
       {/* ── Extension modal ────────────────────────────────────────────────────── */}
       {showExtModal && (
