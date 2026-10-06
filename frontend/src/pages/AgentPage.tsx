@@ -170,6 +170,7 @@ function useWebRTCSoftphone(
   const [callSession, setCallSession] = useState<any>(null)
   const uaRef = useRef<any>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const activeSessionRef = useRef<any>(null)
   const onIncomingCallRef = useRef(onIncomingCall)
   const onCallEndedRef = useRef(onCallEnded)
   const answerModeRef = useRef(answerMode)
@@ -207,6 +208,14 @@ function useWebRTCSoftphone(
       const session = e.session
       if (session.direction !== 'incoming') return
 
+      // Already on a call: reject so Asterisk moves on to the next free agent
+      const current = activeSessionRef.current
+      if (current && !current.isEnded?.()) {
+        try { session.terminate({ status_code: 486, reason_phrase: 'Busy Here' }) } catch { /* ignore */ }
+        return
+      }
+      activeSessionRef.current = session
+
       // Extract caller ID from SIP From header
       const callerId: string = session.remote_identity?.uri?.user || 'Unknown'
       const callerName: string = session.remote_identity?.display_name || ''
@@ -216,8 +225,8 @@ function useWebRTCSoftphone(
       setCallSession(session)
 
       session.on('accepted', () => setStatus('in_call'))
-      session.on('ended', () => { setStatus('registered'); setCallSession(null); onCallEndedRef.current?.() })
-      session.on('failed', () => { setStatus('registered'); setCallSession(null); onCallEndedRef.current?.() })
+      session.on('ended', () => { activeSessionRef.current = null; setStatus('registered'); setCallSession(null); onCallEndedRef.current?.() })
+      session.on('failed', () => { activeSessionRef.current = null; setStatus('registered'); setCallSession(null); onCallEndedRef.current?.() })
 
       session.on('peerconnection', (pe: any) => {
         const pc: RTCPeerConnection = pe.peerconnection
