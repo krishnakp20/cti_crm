@@ -1228,49 +1228,52 @@ export default function AgentPage() {
             </button>
           </div>
           {showDialpad && (
-            <div className="p-4">
-              {/* Number display */}
-              <div className="flex items-center gap-2 mb-3">
-                <input
-                  type="tel"
-                  className="input flex-1 text-center text-lg font-mono tracking-widest"
-                  placeholder="Enter number"
-                  value={dialNumber}
-                  onChange={e => setDialNumber(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && manualDial()}
-                  autoFocus
-                />
-                {dialNumber && (
-                  <button
-                    onClick={() => setDialNumber(v => v.slice(0, -1))}
-                    className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                    title="Backspace"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
+            <div className="p-5 flex justify-center">
+              <div className="w-full max-w-[17rem]">
+                {/* Number display */}
+                <div className="relative mb-4">
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    className="input w-full text-center text-xl font-mono tracking-widest pr-9"
+                    placeholder="Enter number"
+                    value={dialNumber}
+                    onChange={e => setDialNumber(e.target.value.replace(/[^0-9*#+]/g, ''))}
+                    onKeyDown={e => e.key === 'Enter' && manualDial()}
+                    autoFocus
+                  />
+                  {dialNumber && (
+                    <button
+                      onClick={() => setDialNumber(v => v.slice(0, -1))}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      title="Backspace"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                {/* Dialpad grid */}
+                <div className="grid grid-cols-3 gap-3 justify-items-center mb-4">
+                  {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
+                    <button
+                      key={k}
+                      onClick={() => setDialNumber(v => v + k)}
+                      className="w-14 h-14 rounded-full text-lg font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all"
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+                {/* Dial button */}
+                <button
+                  onClick={manualDial}
+                  disabled={!dialNumber.trim() || manualDialing}
+                  className="w-full flex items-center justify-center gap-2 h-11 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-full shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Phone className="w-4 h-4" />
+                  {manualDialing ? 'Dialing…' : 'Dial'}
+                </button>
               </div>
-              {/* Dialpad grid */}
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
-                  <button
-                    key={k}
-                    onClick={() => setDialNumber(v => v + k)}
-                    className="py-3 rounded-xl text-base font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 active:scale-95 transition-all"
-                  >
-                    {k}
-                  </button>
-                ))}
-              </div>
-              {/* Dial button */}
-              <button
-                onClick={manualDial}
-                disabled={!dialNumber.trim() || manualDialing}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50"
-              >
-                <Phone className="w-4 h-4" />
-                {manualDialing ? 'Dialing…' : 'Dial'}
-              </button>
             </div>
           )}
         </div>
