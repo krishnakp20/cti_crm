@@ -86,7 +86,7 @@ def hangup():
 
 API_BASE = os.getenv("CTI_API_URL", "http://localhost:8055/api/v1")
 
-# Voicemail mailbox per queue — caller leaves message here when no agent answers
+# Legacy fallback only. Set the mailbox per route in IVR Routing (voicemail_mailbox) instead.
 QUEUE_VOICEMAIL = {
     "q-general":  "2001@default",
     "q-sales-day": "2002@default",
@@ -173,7 +173,7 @@ def main():
         verbose(f"ivr_router: QUEUESTATUS={queue_result}")
         # Only go to voicemail when call was NOT answered by an agent
         if queue_result in ("TIMEOUT", "JOINEMPTY", "LEAVEEMPTY", "JOINUNAVAIL", "LEAVEUNAVAIL"):
-            mailbox = QUEUE_VOICEMAIL.get(queue_name)
+            mailbox = route.get("voicemail_mailbox") or QUEUE_VOICEMAIL.get(queue_name)
             if mailbox:
                 agi_send('EXEC Playback "vm-nobodyavail"')
                 agi_send(f'EXEC VoiceMail "{mailbox},u"')

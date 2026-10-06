@@ -138,6 +138,7 @@ export default function IVRRoutingPage() {
       backup_agent_id: fd.get('backup_agent_id') ? Number(fd.get('backup_agent_id')) : null,
       backup_number: fd.get('backup_number') as string || null,
       queue_name: fd.get('queue_name') as string || null,
+      voicemail_mailbox: fd.get('voicemail_mailbox') as string || null,
       dept_audio: fd.get('dept_audio') as string || null,
       notes: fd.get('notes') as string || null,
       sort_order: Number(fd.get('sort_order') || 0),
@@ -414,6 +415,12 @@ export default function IVRRoutingPage() {
                 <label className="label">Queue Name <span className="text-xs text-gray-400 font-normal">(recommended)</span></label>
                 <input name="queue_name" className="input" defaultValue={editRoute.queue_name ?? ''} placeholder="e.g. q-general, q-sales-day" />
                 <p className="text-xs text-gray-400 mt-1">Asterisk queue name — enables call queuing when agent is busy</p>
+              </div>
+
+              <div>
+                <label className="label">Voicemail Mailbox <span className="text-xs text-gray-400 font-normal">(optional)</span></label>
+                <input name="voicemail_mailbox" className="input" defaultValue={editRoute.voicemail_mailbox ?? ''} placeholder="e.g. 2015@default" />
+                <p className="text-xs text-gray-400 mt-1">Callers leave a message here when nobody answers. The mailbox must exist in Asterisk voicemail.conf</p>
               </div>
 
               <div>

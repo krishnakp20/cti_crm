@@ -3,7 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import Optional
-from pydantic import BaseModel
+import re
+from pydantic import BaseModel, field_validator
 
 from app.core.database import get_db
 from app.middleware.auth import get_current_user
@@ -23,10 +24,21 @@ class RouteUpsert(BaseModel):
     backup_agent_id: Optional[int] = None
     backup_number: Optional[str] = None
     queue_name: Optional[str] = None
+    voicemail_mailbox: Optional[str] = None
     dept_audio: Optional[str] = None
     notes: Optional[str] = None
     sort_order: int = 0
     is_active: bool = True
+
+    @field_validator("voicemail_mailbox")
+    @classmethod
+    def _mailbox_format(cls, v):
+        if v is None or v.strip() == "":
+            return None
+        v = v.strip()
+        if not re.fullmatch(r"[0-9A-Za-z_.-]+(@[0-9A-Za-z_.-]+)?", v):
+            raise ValueError("Mailbox must look like 2001 or 2001@default")
+        return v
 
 
 class OverrideRequest(BaseModel):
@@ -59,6 +71,7 @@ def _route_dict(r: IVRRoute, agents: dict) -> dict:
         "backup_agent_extension": agents.get(r.backup_agent_id, {}).get("extension") if r.backup_agent_id else None,
         "backup_number": r.backup_number,
         "queue_name": r.queue_name,
+        "voicemail_mailbox": r.voicemail_mailbox,
         "dept_audio": r.dept_audio,
         "notes": r.notes,
         "sort_order": r.sort_order,
@@ -302,6 +315,7 @@ async def set_override(
                 "Penalty": "1",
                 "MemberName": override_user.full_name,
             })
+            await ami_client.set_ringinuse_off(q, f"PJSIP/{override_user.extension}")
         except Exception as e:
             pass  # AMI errors don't block the override save
 
@@ -413,6 +427,7 @@ async def agi_lookup(
         "department": route.department_name,
         "ring_timeout": cfg.ring_timeout,
         "queue_name": route.queue_name,
+        "voicemail_mailbox": route.voicemail_mailbox,
         "primary_extension": agent_ext,
         "backup_type": route.backup_type,
         "backup_extension": backup_ext,

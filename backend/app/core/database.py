@@ -42,3 +42,24 @@ async def init_db():
     import app.models.ivr  # noqa
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _ensure_columns()
+
+
+def _add_missing_columns(sync_conn):
+    from sqlalchemy import inspect, text
+    # create_all never alters existing tables; add columns introduced after first deploy
+    wanted = [("ivr_routes", "voicemail_mailbox", "VARCHAR(100) NULL")]
+    insp = inspect(sync_conn)
+    for table, column, ddl in wanted:
+        existing = {c["name"] for c in insp.get_columns(table)}
+        if column not in existing:
+            sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+
+async def _ensure_columns():
+    import logging
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(_add_missing_columns)
+    except Exception as e:
+        logging.getLogger(__name__).warning("Column check failed: %s", e)

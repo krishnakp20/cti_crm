@@ -26,6 +26,7 @@ class AMIClient:
         self._active_calls: dict = {}       # uniqueid → call state
         self._queue_callers: dict = {}      # uniqueid → queue entry time
         self._ivr_vars: dict = {}           # uniqueid → {ivr_selection, ivr_department}
+        self._ringinuse_gen = 0             # invalidates stale reconcile loops after a reconnect
 
     def add_listener(self, fn):
         self._listeners.append(fn)
@@ -50,11 +51,29 @@ class AMIClient:
                 self._connected = True
                 logger.info("AMI connected to %s:%s", AMI_HOST, AMI_PORT)
                 asyncio.create_task(self._read_loop())
+                self._ringinuse_gen += 1
+                asyncio.create_task(self._ringinuse_loop(self._ringinuse_gen))
                 return
             except Exception as e:
                 logger.warning("AMI connect failed: %s — retrying in %ss", e, delay)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 60)  # backoff: 5s, 10s, 20s, 40s, 60s max
+
+    async def _ringinuse_loop(self, gen: int):
+        """Every few minutes, ask Asterisk for all queue members; QueueMember events
+        then switch ringinuse off for any member still allowed to ring while in use."""
+        await asyncio.sleep(3)  # let the login finish
+        while self._connected and gen == self._ringinuse_gen:
+            await self.send_action({"Action": "QueueStatus"})
+            await asyncio.sleep(300)
+
+    async def set_ringinuse_off(self, queue: str, interface: str):
+        await self.send_action({
+            "Action": "QueueMemberRingInUse",
+            "Queue": queue,
+            "Interface": interface,
+            "RingInUse": "false",
+        })
 
     async def _login(self):
         self.writer.write(
@@ -261,6 +280,13 @@ class AMIClient:
                 "talk_time": str(duration),
             })
             await self._save_cdr_complete_hangup(uid, duration)
+
+        elif event == "QueueMember":
+            # Reply to QueueStatus. Never ring an agent who is already on a call.
+            iface = pkt.get("Interface") or pkt.get("Location") or pkt.get("Name") or ""
+            queue = pkt.get("Queue", "")
+            if queue and "/" in iface and pkt.get("Ringinuse") != "0":
+                await self.set_ringinuse_off(queue, iface)
 
         elif event == "MixMonitorStart":
             await self._save_recording_path(uid, pkt.get("FileName", ""))
